@@ -1,0 +1,6 @@
+package-as: ItemNotesAddon
+
+ignore:
+  - README.md
+  - screenshots
+  - .gitignore

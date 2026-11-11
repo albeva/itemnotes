@@ -8,8 +8,9 @@
 ## AddonCompartmentFunc: ItemNotes_OnAddonCompartmentClick
 ## Category-enUS: Inventory
 
-Core.lua
-Widgets.lua
-Editor.lua
-Browser.lua
-Options.lua
+Core\Core.lua
+
+UI\Widgets.lua
+UI\Editor.lua
+UI\Browser.lua
+UI\Options.lua
