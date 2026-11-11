@@ -479,24 +479,32 @@ end
 -- Map pins
 -- ---------------------------------------------------------------------------
 
+-- Adds a TomTom waypoint for the pin. Returns false when TomTom is not loaded or its call fails.
+local function AddTomTomWaypoint(pin, title)
+    if type(TomTom) ~= "table" or type(TomTom.AddWaypoint) ~= "function" then return false end
+    -- Third-party API: its failures must not stop the map from opening.
+    return (pcall(function()
+        if TomTom.WaypointExists and TomTom:WaypointExists(pin.mapID, pin.x, pin.y, title) then return end
+        TomTom:AddWaypoint(pin.mapID, pin.x, pin.y, { title = title, from = ns.title })
+    end))
+end
+
+-- Places the Blizzard map pin (the one ctrl-click on the world map sets) and tracks it.
+local function SetUserWaypoint(pin)
+    if not (C_Map and C_Map.SetUserWaypoint and UiMapPoint) then return end
+    ns.Try(function()
+        if C_Map.CanSetUserWaypointOnMap and not C_Map.CanSetUserWaypointOnMap(pin.mapID) then return end
+        C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(pin.mapID, pin.x, pin.y))
+        if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then
+            C_SuperTrack.SetSuperTrackedUserWaypoint(true)
+        end
+    end)
+end
+
 function ns.OpenPin(pin)
     local label = ns.PinLabel(pin)
-    local title = pin.title or label
-    if TomTom and TomTom.AddWaypoint then
-        -- Third-party API: its failures must not stop the map from opening.
-        pcall(function()
-            if TomTom.WaypointExists and TomTom:WaypointExists(pin.mapID, pin.x, pin.y, title) then return end
-            TomTom:AddWaypoint(pin.mapID, pin.x, pin.y, { title = title, from = ns.title })
-        end)
-    elseif C_Map and C_Map.SetUserWaypoint and UiMapPoint then
-        ns.Try(function()
-            if C_Map.CanSetUserWaypointOnMap and not C_Map.CanSetUserWaypointOnMap(pin.mapID) then return end
-            C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(pin.mapID, pin.x, pin.y))
-            if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then
-                C_SuperTrack.SetSuperTrackedUserWaypoint(true)
-            end
-        end)
-    end
+    -- TomTom takes the waypoint when it is installed; otherwise it goes to the Blizzard map pin.
+    if not AddTomTomWaypoint(pin, pin.title or label) then SetUserWaypoint(pin) end
     local opened = ns.Try(function()
         if OpenWorldMap then
             OpenWorldMap(pin.mapID)
