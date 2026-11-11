@@ -30,9 +30,10 @@ read_globals = {
     -- Functions
     "ChatEdit_InsertLink", "ChatFrame_OpenChat", "ClearCursor", "CreateFrame",
     "GameTooltip_Hide", "GetBindingKey", "GetBindingText", "GetContainerItemID", "GetContainerItemInfo",
-    "GetContainerNumSlots",
+    "GetContainerItemQuestInfo", "GetContainerNumSlots",
     "GetCursorInfo", "GetItemInfo", "GetItemInfoInstant", "GetMouseFoci", "GetMouseFocus",
-    "GetQuestLogIndexByID",
+    "GetNumQuestLeaderBoards", "GetNumQuestLogEntries", "GetQuestLogIndexByID", "GetQuestLogLeaderBoard",
+    "GetQuestLogSpecialItemInfo", "GetQuestLogTitle",
     "GetRealmName", "GetRealZoneText", "GetSubZoneText", "HideUIPanel",
     "InCombatLockdown", "InterfaceOptions_AddCategory", "InterfaceOptionsFrame_OpenToCategory",
     "IsBagOpen", "IsControlKeyDown", "IsMetaKeyDown", "IsModifiedClick", "IsShiftKeyDown",
@@ -49,5 +50,5 @@ read_globals = {
     "ITEM_QUALITY_COLORS", "NO", "NUM_BAG_SLOTS", "NUM_TOTAL_EQUIPPED_BAG_SLOTS", "YES",
 
     -- Other addons
-    "TomTom",
+    "QuestieLoader", "TomTom",
 }

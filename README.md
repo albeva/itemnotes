@@ -29,6 +29,8 @@ While the editor is open:
 - **Drag** an item onto the window to attach it
 - **Add My Location** / **Add Map Pin** attach a map location
 
+A new note for an item that belongs to a quest starts with that quest attached: the quest the item starts, or a quest in your quest log that uses or collects it. With Questie installed, quests that are not in your log are found too. Remove the reference if it is not the one you want.
+
 A reference to another note opens that note, and goes both ways: attach note B to note A and B lists A as well. Removing it from either side removes it from both. Deleting a note also removes every reference to it.
 
 Closing the editor with Escape keeps unsaved changes: open the same item again to continue. **Cancel** discards them.

@@ -441,7 +441,9 @@ function ns.OpenEditor(itemID, force)
     icon = icon or (note and note.icon)
 
     editor.itemID = itemID
-    editor.quests = CopyList(note and note.quests)
+    -- A new note starts with the item's quests already attached. They are its starting point, not an edit:
+    -- closing the editor untouched keeps nothing, and removing one is an edit like any other.
+    editor.quests = note and CopyList(note.quests) or ns.QuestsForItem(itemID)
     editor.pins = CopyList(note and note.pins)
     editor.items = CopyList(note and note.items)
     editor.notes = CopyList(note and note.notes)

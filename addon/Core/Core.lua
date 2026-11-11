@@ -205,15 +205,15 @@ end
 -- ---------------------------------------------------------------------------
 
 -- What the carried bags (backpack, equipped bags, reagent bag) hold: how many of each item, and the first bag
--- holding it. Built on first use and thrown away whenever the bags change.
-local bagCounts, bagOfItem
+-- and slot holding it. Built on first use and thrown away whenever the bags change.
+local bagCounts, bagOfItem, slotOfItem
 
 -- Returns false when this client has no bag API we know.
 local function ScanBags()
     local numSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
     local slotInfo = C_Container and C_Container.GetContainerItemInfo
     if not numSlots or not (slotInfo or (GetContainerItemID and GetContainerItemInfo)) then return false end
-    local counts, bags = {}, {}
+    local counts, bags, slots = {}, {}, {}
     for bag = 0, NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4 do
         for slot = 1, numSlots(bag) or 0 do
             local itemID, count
@@ -226,11 +226,11 @@ local function ScanBags()
             end
             if itemID then
                 counts[itemID] = (counts[itemID] or 0) + (count or 1)
-                bags[itemID] = bags[itemID] or bag
+                if not bags[itemID] then bags[itemID], slots[itemID] = bag, slot end
             end
         end
     end
-    bagCounts, bagOfItem = counts, bags
+    bagCounts, bagOfItem, slotOfItem = counts, bags, slots
     return true
 end
 
@@ -333,6 +333,146 @@ function ns.OpenQuest(quest)
         if shown then return end
     end
     ns.Print(L["%s (quest %d) is %s."]:format(quest.title or L["Quest"], quest.id, status))
+end
+
+-- ---------------------------------------------------------------------------
+-- Quests an item belongs to
+-- ---------------------------------------------------------------------------
+
+-- Item class of quest items (Enum.ItemClass.Questitem).
+local QUEST_ITEM_CLASS = 12
+-- Most quests attached from a quest database when none of the item's quests is in the quest log.
+local MAX_DATABASE_QUESTS = 5
+
+-- The quest the game ties to the item's bag slot: the one it starts, or the active one it belongs to.
+local function BagItemQuest(itemID)
+    if not bagCounts and not ScanBags() then return nil end
+    local bag, slot = bagOfItem[itemID], slotOfItem[itemID]
+    if not bag then return nil end
+    local questID
+    if C_Container and C_Container.GetContainerItemQuestInfo then
+        local info = C_Container.GetContainerItemQuestInfo(bag, slot)
+        questID = type(info) == "table" and info.questID or nil
+    elseif GetContainerItemQuestInfo then
+        questID = select(2, GetContainerItemQuestInfo(bag, slot))
+    end
+    return IsID(questID) and questID or nil
+end
+
+-- Calls fn(questID, logIndex) for every quest in the quest log.
+local function ForEachLogQuest(fn)
+    if C_QuestLog and C_QuestLog.GetNumQuestLogEntries and C_QuestLog.GetInfo then
+        for index = 1, C_QuestLog.GetNumQuestLogEntries() or 0 do
+            local info = C_QuestLog.GetInfo(index)
+            if info and not info.isHeader and not info.isHidden and IsID(info.questID) then
+                fn(info.questID, index)
+            end
+        end
+    elseif GetNumQuestLogEntries and GetQuestLogTitle then
+        for index = 1, GetNumQuestLogEntries() or 0 do
+            local _, _, _, isHeader, _, _, _, questID = GetQuestLogTitle(index)
+            if not isHeader and IsID(questID) then fn(questID, index) end
+        end
+    end
+end
+
+-- Returns the quest's objectives as a list of { text, type }.
+local function QuestObjectives(questID, logIndex)
+    if C_QuestLog and C_QuestLog.GetQuestObjectives then
+        return C_QuestLog.GetQuestObjectives(questID) or {}
+    end
+    local objectives = {}
+    if GetNumQuestLeaderBoards and GetQuestLogLeaderBoard then
+        for index = 1, GetNumQuestLeaderBoards(logIndex) or 0 do
+            local text, kind = GetQuestLogLeaderBoard(index, logIndex)
+            objectives[index] = { text = text, type = kind }
+        end
+    end
+    return objectives
+end
+
+-- Whether an objective's text ("Wolf Pelt: 3/8", "3/8 Wolf Pelt") is about exactly this item. Whatever is
+-- left after taking out the name and the count must hold no more words, so "Wolf Pelt" does not match
+-- "Thick Wolf Pelt: 0/5".
+local function ObjectiveNamesItem(text, name)
+    if not PublicString(text) then return false end
+    local from, to = text:find(name, 1, true)
+    if not from then return false end
+    local rest = (text:sub(1, from - 1) .. text:sub(to + 1)):gsub("%d+%s*/%s*%d+", "")
+    return not rest:find("%w")
+end
+
+-- Whether a quest in the log uses the item: as the item it gives the player to use, or as something to collect.
+-- Objectives only carry the item's name, so collecting is matched by name; name is nil until the item is cached.
+local function LogQuestUsesItem(questID, logIndex, itemID, name)
+    if GetQuestLogSpecialItemInfo then
+        local link = GetQuestLogSpecialItemInfo(logIndex)
+        if PublicString(link) and tonumber(link:match("item:(%d+)")) == itemID then return true end
+    end
+    if not name then return false end
+    for _, objective in ipairs(QuestObjectives(questID, logIndex)) do
+        if objective.type == "item" and ObjectiveNamesItem(objective.text, name) then return true end
+    end
+    return false
+end
+
+-- Asks Questie's database, when Questie is loaded, which quests the item starts or is needed for.
+-- Returns a list of quest IDs and a function giving a quest's name. Third-party API: any failure means no answer.
+local function QuestieQuests(itemID)
+    local quests, questieDB = {}, nil
+    pcall(function()
+        local module = QuestieLoader:ImportModule("QuestieDB")
+        if type(module.QueryItemSingle) ~= "function" then return end
+        questieDB = module
+        local starts = module.QueryItemSingle(itemID, "startQuest")
+        if IsID(starts) then quests[#quests + 1] = starts end
+        local related = module.QueryItemSingle(itemID, "relatedQuests")
+        if type(related) == "table" then
+            for _, questID in ipairs(related) do
+                if IsID(questID) then quests[#quests + 1] = questID end
+            end
+        end
+    end)
+    local function Title(questID)
+        local ok, title = pcall(function() return questieDB.QueryQuestSingle(questID, "name") end)
+        return ok and type(title) == "string" and title ~= "" and title or nil
+    end
+    return quests, Title
+end
+
+-- Returns the quests an item belongs to, as quest references ready to attach to a note. The game cannot look
+-- up quests by item, so this gathers what is known: the quest tied to the item in the bags, quests in the
+-- quest log that use or collect it, and Questie's database when that addon is loaded. A quest that is not in
+-- the log can only come from Questie, and is only offered for a quest item none of whose quests is in the log.
+function ns.QuestsForItem(itemID)
+    local found, seen = {}, {}
+    local function Add(questID, title)
+        if not IsID(questID) or seen[questID] then return end
+        seen[questID] = true
+        found[#found + 1] = { id = questID, title = ns.QuestTitle(questID) or title }
+    end
+
+    ns.Try(function() Add(BagItemQuest(itemID)) end)
+    ns.Try(function()
+        local name = ns.ItemInfo(itemID)
+        ForEachLogQuest(function(questID, logIndex)
+            if LogQuestUsesItem(questID, logIndex, itemID, name) then Add(questID) end
+        end)
+    end)
+
+    local known, Title = QuestieQuests(itemID)
+    for _, questID in ipairs(known) do
+        if select(2, ns.QuestStatus(questID)) then Add(questID, Title(questID)) end
+    end
+    if #found == 0 then
+        local instant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+        if instant and select(6, instant(itemID)) == QUEST_ITEM_CLASS then
+            for index = 1, math.min(#known, MAX_DATABASE_QUESTS) do
+                Add(known[index], Title(known[index]))
+            end
+        end
+    end
+    return found
 end
 
 -- ---------------------------------------------------------------------------
@@ -729,7 +869,7 @@ events:SetScript("OnEvent", function(self, event, arg1)
         end
     elseif event == "BAG_UPDATE_DELAYED" or event == "BAG_UPDATE" then
         -- The open windows show bag counts, so they refresh as if a note had changed.
-        bagCounts, bagOfItem = nil, nil
+        bagCounts, bagOfItem, slotOfItem = nil, nil, nil
         if ns.db then FireChanged() end
     end
 end)

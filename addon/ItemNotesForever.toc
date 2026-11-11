@@ -5,7 +5,7 @@
 ## Version: @project-version@
 ## IconTexture: Interface\AddOns\ItemNotesForever\Media\icon
 ## SavedVariables: ItemNotesDB
-## OptionalDeps: TomTom
+## OptionalDeps: TomTom, Questie
 ## AddonCompartmentFunc: ItemNotes_OnAddonCompartmentClick
 ## Category-enUS: Inventory
 ## X-License: MIT
