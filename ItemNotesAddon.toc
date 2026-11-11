@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: Item Notes
 ## Notes: Attach personal notes, quests and map locations to items. Notes show in item tooltips.
-## Author: Albert
+## Author: Albeva
 ## Version: 1.0.0
 ## IconTexture: Interface\Icons\INV_Misc_Note_01
 ## SavedVariables: ItemNotesDB
