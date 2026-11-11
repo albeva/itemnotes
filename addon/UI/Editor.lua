@@ -1,7 +1,13 @@
 local _, ns = ...
+local L = ns.L
 
 local editor, picker
-local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+
+-- Unsaved edits from an editor that was closed without Save or Cancel (Escape, the close button).
+-- They come back the next time the same item is opened, so a stray Escape never loses typing.
+local draft
+-- Set by Save, Cancel and Delete: the editor is closing on purpose, so nothing is kept as a draft.
+local closing = false
 
 local function CopyList(list)
     local copy = {}
@@ -11,6 +17,15 @@ local function CopyList(list)
         copy[index] = item
     end
     return copy
+end
+
+-- Line breaks (from notes written with the earlier multi-line editor) become spaces in the single-line box.
+local function SingleLine(text)
+    return ns.Trim((text or ""):gsub("%s*\n%s*", " "))
+end
+
+local function IsDirty()
+    return editor.refsChanged or ns.Trim(editor.edit:GetText()) ~= editor.originalText
 end
 
 -- ---------------------------------------------------------------------------
@@ -23,10 +38,15 @@ local function RefreshRefs()
     editor.noRefs:SetShown(#items == 0)
 end
 
+local function RefsChanged()
+    editor.refsChanged = true
+    RefreshRefs()
+end
+
 local function RemoveRef(item)
     local lists = { quest = editor.quests, pin = editor.pins, item = editor.items }
     table.remove(lists[item.kind], item.index)
-    RefreshRefs()
+    RefsChanged()
 end
 
 local function AddItem(itemID)
@@ -36,7 +56,7 @@ local function AddItem(itemID)
     end
     local name, _, quality = ns.ItemInfo(itemID)
     editor.items[#editor.items + 1] = { id = itemID, name = name, quality = quality }
-    RefreshRefs()
+    RefsChanged()
 end
 
 -- Attaches the item currently held on the cursor (dragged from a bag, for example).
@@ -52,8 +72,8 @@ local function AddQuest(questID, title)
     for _, quest in ipairs(editor.quests) do
         if quest.id == questID then return end
     end
-    editor.quests[#editor.quests + 1] = { id = questID, title = title or ns.QuestTitle(questID) or ("Quest #" .. questID) }
-    RefreshRefs()
+    editor.quests[#editor.quests + 1] = { id = questID, title = title or ns.QuestTitle(questID) }
+    RefsChanged()
 end
 
 local function AddPin(pin, problem)
@@ -67,7 +87,7 @@ local function AddPin(pin, problem)
         end
     end
     editor.pins[#editor.pins + 1] = pin
-    RefreshRefs()
+    RefsChanged()
 end
 
 -- ---------------------------------------------------------------------------
@@ -75,7 +95,7 @@ end
 -- ---------------------------------------------------------------------------
 
 local function ValidQuestID(value, mustBeInLog)
-    if not ns.PublicNumber(value) or value <= 0 or value ~= math.floor(value) then return false end
+    if not ns.IsID(value) then return false end
     local _, logIndex = ns.QuestStatus(value)
     if logIndex then return true end
     return not mustBeInLog and ns.QuestTitle(value) ~= nil
@@ -128,7 +148,7 @@ end
 -- Blizzard's own shift-click toggles quest tracking when no chat box is open. Put the tracking state back.
 local function RestoreWatch(questID, wasWatched)
     if wasWatched == nil or IsWatched(questID) == wasWatched then return end
-    pcall(function()
+    ns.Try(function()
         if wasWatched then
             C_QuestLog.AddQuestWatch(questID)
         else
@@ -137,11 +157,17 @@ local function RestoreWatch(questID, wasWatched)
     end)
 end
 
+-- Blizzard's own shift-click on a stack opens the split-stack prompt. The click was meant for us: close it.
+local function HideStackSplit()
+    if StackSplitFrame and StackSplitFrame:IsShown() then StackSplitFrame:Hide() end
+end
+
 local pendingQuest, pendingWatched
+local pendingItem = false
 
 local function OnGlobalMouse(_, event, button)
     if event == "GLOBAL_MOUSE_DOWN" then
-        pendingQuest = nil
+        pendingQuest, pendingItem = nil, false
         if button ~= "LeftButton" or not IsShiftKeyDown() then return end
         local ok, questID = pcall(QuestIDUnderMouse)
         if ok and questID then
@@ -150,13 +176,22 @@ local function OnGlobalMouse(_, event, button)
         elseif not editor:IsMouseOver() and not (picker and picker:IsShown() and picker:IsMouseOver()) then
             -- Not a quest: attach whatever item the mouse is hovering (bag slot, quest reward, list row...).
             local itemID = ns.HoveredItem()
-            if itemID then AddItem(itemID) end
+            if itemID then
+                AddItem(itemID)
+                pendingItem = true
+            end
         end
-    elseif pendingQuest then
-        -- Mouse released: the clicked frame's own handler has run by the next frame.
-        local questID, wasWatched = pendingQuest, pendingWatched
-        pendingQuest = nil
-        C_Timer.After(0.05, function() RestoreWatch(questID, wasWatched) end)
+    elseif event == "GLOBAL_MOUSE_UP" then
+        -- Mouse released: the clicked frame's own handler has run by the next frame. Undo its side effects.
+        if pendingQuest then
+            local questID, wasWatched = pendingQuest, pendingWatched
+            pendingQuest = nil
+            C_Timer.After(0.05, function() RestoreWatch(questID, wasWatched) end)
+        end
+        if pendingItem then
+            pendingItem = false
+            C_Timer.After(0.05, HideStackSplit)
+        end
     end
 end
 
@@ -166,13 +201,13 @@ end
 
 local function ShowQuestPicker()
     if not picker then
-        picker = ns.CreateWindow("ItemNotesQuestPicker", editor, 300, 380, "Attach Quest")
+        picker = ns.CreateWindow("ItemNotesQuestPicker", editor, 300, 380, L["Attach Quest"])
         picker:SetPoint("TOPLEFT", editor, "TOPRIGHT", 6, 0)
         picker:SetFrameStrata("DIALOG")
         picker:SetMovable(false)
         picker:RegisterForDrag()
 
-        local label = ns.Caption(picker, "From your quest log")
+        local label = ns.Caption(picker, L["From your quest log"])
         label:SetPoint("TOPLEFT", 14, -42)
 
         local panel
@@ -194,12 +229,12 @@ local function ShowQuestPicker()
 
         picker.empty = ns.Text(panel, "normal", "muted")
         picker.empty:SetPoint("TOP", 0, -24)
-        picker.empty:SetText("Your quest log is empty.")
+        picker.empty:SetText(L["Your quest log is empty."])
 
-        local idLabel = ns.Caption(picker, "Or by quest ID")
+        local idLabel = ns.Caption(picker, L["Or by quest ID"])
         idLabel:SetPoint("BOTTOMLEFT", 14, 48)
 
-        local idBox = ns.CreateInput(picker, 150, "Quest ID")
+        local idBox = ns.CreateInput(picker, 150, L["Quest ID"])
         idBox:SetPoint("BOTTOMLEFT", 20, 16)
         idBox:SetNumeric(true)
         idBox:SetMaxLetters(9)
@@ -207,13 +242,13 @@ local function ShowQuestPicker()
 
         local function AddByID()
             local questID = tonumber(idBox:GetText())
-            if questID and questID > 0 then
+            if ns.IsID(questID) then
                 AddQuest(questID)
                 picker:Hide()
             end
         end
         idBox:SetScript("OnEnterPressed", AddByID)
-        local add = ns.CreateButton(picker, "Add", 80, AddByID, "primary")
+        local add = ns.CreateButton(picker, L["Add"], 80, AddByID)
         add:SetPoint("LEFT", idBox, "RIGHT", 8, 0)
     end
     local quests = ns.QuestLogQuests()
@@ -227,6 +262,12 @@ end
 -- Editor window
 -- ---------------------------------------------------------------------------
 
+-- Hides the editor on purpose (Save, Cancel, Delete), discarding whatever was being edited.
+local function Close()
+    closing = true
+    editor:Hide()
+end
+
 local function Save()
     local itemID = editor.itemID
     local text = ns.Trim(editor.edit:GetText())
@@ -236,11 +277,22 @@ local function Save()
     else
         ns.SaveNote(itemID, text, editor.quests, editor.pins, editor.items)
     end
-    editor:Hide()
+    Close()
 end
 
+StaticPopupDialogs["ITEMNOTES_DISCARD"] = {
+    text = L["Discard your unsaved changes to the note for %s?"],
+    button1 = YES,
+    button2 = NO,
+    OnAccept = function(_, itemID) ns.OpenEditor(itemID, true) end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
 local function CreateEditor()
-    editor = ns.CreateWindow("ItemNotesEditor", UIParent, 440, 350, "Item Note")
+    editor = ns.CreateWindow("ItemNotesEditor", UIParent, 440, 350, L["Item Note"])
     editor:SetPoint("CENTER", 0, 40)
     editor:SetFrameStrata("DIALOG")
     table.insert(UISpecialFrames, "ItemNotesEditor")
@@ -270,11 +322,11 @@ local function CreateEditor()
     editor:SetScript("OnMouseUp", TakeCursorItem)
 
     -- Note text: the standard single-line input box. Enter saves.
-    local noteLabel = ns.Caption(editor, "Note")
+    local noteLabel = ns.Caption(editor, L["Note"])
     noteLabel:SetPoint("TOPLEFT", 14, -78)
     local hint = ns.Text(editor, "small", "muted")
     hint:SetPoint("TOPRIGHT", -14, -79)
-    hint:SetText("Enter saves")
+    hint:SetText(L["Enter saves"])
 
     local edit = ns.CreateInput(editor, 404, "")
     edit:SetPoint("TOPLEFT", 20, -93)
@@ -283,12 +335,12 @@ local function CreateEditor()
     editor.edit = edit
 
     -- References
-    local refLabel = ns.Caption(editor, "References")
+    local refLabel = ns.Caption(editor, L["References"])
     refLabel:SetPoint("TOPLEFT", 14, -121)
 
     local refHint = ns.Text(editor, "small", "muted")
     refHint:SetPoint("TOPRIGHT", -14, -122)
-    refHint:SetText("Shift-click a quest or item to attach it")
+    refHint:SetText(L["Shift-click a quest or item to attach it"])
 
     local refPanel
     refPanel, editor.refs = ns.CreateRefList(editor, RemoveRef, TakeCursorItem)
@@ -301,28 +353,28 @@ local function CreateEditor()
     editor.noRefs = ns.Text(refPanel, "small", "muted")
     editor.noRefs:SetPoint("CENTER")
     editor.noRefs:SetJustifyH("CENTER")
-    editor.noRefs:SetText("No items, quests or map locations attached.\nShift-click a quest or an item anywhere in the game,\nor drag an item onto this window.")
+    editor.noRefs:SetText(L["No items, quests or map locations attached.\nShift-click a quest or an item anywhere in the game,\nor drag an item onto this window."])
 
-    local addQuest = ns.CreateButton(editor, "Add Quest", 110, ShowQuestPicker)
+    local addQuest = ns.CreateButton(editor, L["Add Quest"], 110, ShowQuestPicker)
     addQuest:SetPoint("TOPLEFT", 14, -238)
-    addQuest.tooltipTitle = "Pick a quest from your log or enter a quest ID."
-    addQuest.tooltipText = "Faster: shift-click a quest in the tracker or quest log while this window is open."
+    addQuest.tooltipTitle = L["Pick a quest from your log or enter a quest ID."]
+    addQuest.tooltipText = L["Faster: shift-click a quest in the tracker or quest log while this window is open."]
 
-    local addHere = ns.CreateButton(editor, "Add My Location", 140, function()
+    local addHere = ns.CreateButton(editor, L["Add My Location"], 140, function()
         local loc = ns.CaptureLocation()
         local pin = loc.mapID and loc.x and { mapID = loc.mapID, x = loc.x, y = loc.y, name = ns.MapName(loc.mapID) }
-        AddPin(pin, "Your position is not available here (instances have no map coordinates).")
+        AddPin(pin, L["Your position is not available here (instances have no map coordinates)."])
     end)
     addHere:SetPoint("LEFT", addQuest, "RIGHT", 6, 0)
-    addHere.tooltipTitle = "Attach where you are standing right now."
+    addHere.tooltipTitle = L["Attach where you are standing right now."]
 
-    local addWaypoint = ns.CreateButton(editor, "Add Map Pin", 120, function()
-        AddPin(ns.GetUserWaypointPin(), "No map pin set. Ctrl-click the world map to place one, then try again.")
+    local addWaypoint = ns.CreateButton(editor, L["Add Map Pin"], 120, function()
+        AddPin(ns.GetUserWaypointPin(), L["No map pin set. Ctrl-click the world map to place one, then try again."])
     end)
     addWaypoint:SetPoint("LEFT", addHere, "RIGHT", 6, 0)
     addWaypoint:SetShown(C_Map ~= nil and C_Map.GetUserWaypoint ~= nil)
-    addWaypoint.tooltipTitle = "Attach your current world map pin."
-    addWaypoint.tooltipText = "Ctrl-click the world map to place a pin first."
+    addWaypoint.tooltipTitle = L["Attach your current world map pin."]
+    addWaypoint.tooltipText = L["Ctrl-click the world map to place a pin first."]
 
     editor.recorded = ns.Text(editor, "small", "muted")
     editor.recorded:SetPoint("TOPLEFT", 14, -266)
@@ -331,39 +383,70 @@ local function CreateEditor()
     editor.recorded:SetSpacing(2)
 
     -- Bottom buttons
-    local save = ns.CreateButton(editor, "Save", 100, Save, "primary")
+    local save = ns.CreateButton(editor, L["Save"], 100, Save)
     save:SetPoint("BOTTOMRIGHT", -14, 10)
 
-    local cancel = ns.CreateButton(editor, "Cancel", 90, function() editor:Hide() end)
+    local cancel = ns.CreateButton(editor, L["Cancel"], 90, Close)
     cancel:SetPoint("RIGHT", save, "LEFT", -6, 0)
 
-    editor.delete = ns.CreateButton(editor, "Delete note", 100, function()
+    editor.delete = ns.CreateButton(editor, L["Delete note"], 100, function()
         local itemID = editor.itemID
-        editor:Hide()
+        Close()
         ns.ConfirmDelete(itemID)
-    end, "danger")
+    end)
     editor.delete:SetPoint("BOTTOMLEFT", 14, 10)
 
     -- Watch mouse clicks only while the editor is open.
     editor:SetScript("OnEvent", OnGlobalMouse)
     editor:SetScript("OnShow", function(self)
+        -- Not every client has these events; without them shift-click attaching is simply unavailable.
         pcall(self.RegisterEvent, self, "GLOBAL_MOUSE_DOWN")
         pcall(self.RegisterEvent, self, "GLOBAL_MOUSE_UP")
     end)
     editor:SetScript("OnHide", function(self)
         self:UnregisterAllEvents()
-        pendingQuest = nil
+        pendingQuest, pendingItem = nil, false
+        if not closing and IsDirty() then
+            draft = {
+                itemID = editor.itemID,
+                text = edit:GetText(),
+                quests = editor.quests,
+                pins = editor.pins,
+                items = editor.items,
+            }
+            ns.Print(L["Unsaved changes kept. Open the note again to continue editing."])
+        end
+        closing = false
         edit:ClearFocus()
         if picker then picker:Hide() end
     end)
 end
 
-function ns.OpenEditor(itemID)
+function ns.IsEditorOpen()
+    return editor ~= nil and editor:IsShown()
+end
+
+-- Opens the editor for an item. If it is already editing another item with unsaved changes, asks before
+-- replacing them; force skips that question.
+function ns.OpenEditor(itemID, force)
     if not ns.db then return end
     if not editor then
         CreateEditor()
-        editor:Hide()
+        -- Frames are created shown. Nothing is being edited yet, so there is no draft to keep.
+        Close()
     end
+    if editor:IsShown() and not force then
+        if editor.itemID == itemID then
+            editor:Raise()
+            editor.edit:SetFocus()
+            return
+        end
+        if IsDirty() then
+            StaticPopup_Show("ITEMNOTES_DISCARD", editor.name:GetText(), nil, itemID)
+            return
+        end
+    end
+
     local note = ns.GetNote(itemID)
     local name, _, quality, icon = ns.ItemInfo(itemID)
     name = name or (note and note.name)
@@ -374,16 +457,25 @@ function ns.OpenEditor(itemID)
     editor.quests = CopyList(note and note.quests)
     editor.pins = CopyList(note and note.pins)
     editor.items = CopyList(note and note.items)
-    editor.title:SetText(note and "Edit Item Note" or "New Item Note")
-    editor.icon.texture:SetTexture(icon or FALLBACK_ICON)
-    editor.name:SetText(name or ("Item #" .. itemID))
+    editor.refsChanged = false
+    editor.originalText = SingleLine(note and note.text)
+    editor.title:SetText(note and L["Edit Item Note"] or L["New Item Note"])
+    editor.icon.texture:SetTexture(icon or ns.FALLBACK_ICON)
+    editor.name:SetText(ns.ItemName(itemID, name))
     editor.name:SetTextColor(ns.QualityColor(quality))
-    editor.meta:SetText("Item ID " .. itemID)
-    -- Notes written with the earlier multi-line editor may contain line breaks.
-    editor.edit:SetText(((note and note.text or ""):gsub("%s*\n%s*", " ")))
+    editor.meta:SetText(L["Item ID %d"]:format(itemID))
+    editor.edit:SetText(editor.originalText)
     editor.delete:SetShown(note ~= nil)
     editor.recorded:SetText(note and ns.RecordedText(note)
-        or "Your location and the time are recorded when you save.")
+        or L["Your location and the time are recorded when you save."])
+
+    if draft and draft.itemID == itemID then
+        editor.quests, editor.pins, editor.items = draft.quests, draft.pins, draft.items
+        editor.refsChanged = true
+        editor.edit:SetText(draft.text)
+        draft = nil
+    end
+
     if picker then picker:Hide() end
     RefreshRefs()
     editor:Show()

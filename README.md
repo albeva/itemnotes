@@ -27,6 +27,8 @@ While the editor is open:
 - **Drag** an item onto the window to attach it
 - **Add My Location** / **Add Map Pin** attach a map location
 
+Closing the editor with Escape keeps unsaved changes: open the same item again to continue. **Cancel** discards them.
+
 ### See it in the tooltip
 
 ![Tooltip](screenshots/tooltip.png)
@@ -53,14 +55,37 @@ Set the keybind under **Options > Keybindings > AddOns > Item Notes**. There is 
 
 ## Install
 
-Clone into your AddOns folder. The folder must be named `ItemNotesAddon`:
+The addon itself lives in the `addon` folder of this repository. Copy that folder into your AddOns folder and name it `ItemNotesAddon`:
 
 ```
-cd "World of Warcraft/_forever_/Interface/AddOns"
-git clone https://github.com/albeva/itemnotes ItemNotesAddon
+World of Warcraft/_forever_/Interface/AddOns/ItemNotesAddon/ItemNotesAddon.toc
+```
+
+To keep it updated with `git pull`, clone the repository anywhere and link the folder instead of copying it.
+
+Windows (Command Prompt):
+
+```
+git clone https://github.com/albeva/itemnotes
+mklink /J "C:\Path\To\World of Warcraft\_forever_\Interface\AddOns\ItemNotesAddon" "itemnotes\addon"
+```
+
+macOS:
+
+```
+git clone https://github.com/albeva/itemnotes
+ln -s "$PWD/itemnotes/addon" "/Applications/World of Warcraft/_forever_/Interface/AddOns/ItemNotesAddon"
 ```
 
 Restart the game.
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `addon/` | Everything the game loads |
+| `art/` | Icon source (SVG) and a 512px render |
+| `screenshots/` | Images for this page |
 
 ## License
 
