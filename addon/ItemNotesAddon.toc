@@ -2,7 +2,7 @@
 ## Title: Item Notes
 ## Notes: Attach personal notes, quests and map locations to items. Notes show in item tooltips.
 ## Author: Albeva
-## Version: 1.0.0
+## Version: @project-version@
 ## IconTexture: Interface\AddOns\ItemNotesAddon\Media\icon
 ## SavedVariables: ItemNotesDB
 ## OptionalDeps: TomTom
@@ -10,6 +10,7 @@
 ## Category-enUS: Inventory
 ## X-License: MIT
 ## X-Website: https://github.com/albeva/itemnotes
+## X-Curse-Project-ID: 1799129
 
 Core\Locale.lua
 Core\Core.lua
