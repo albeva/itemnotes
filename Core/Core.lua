@@ -1,12 +1,15 @@
 local addonName, ns = ...
+local L = ns.L
 
-ns.title = "Item Notes"
+ns.title = L["Item Notes"]
+ns.FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 
-BINDING_HEADER_ITEMNOTES = "Item Notes"
-BINDING_NAME_ITEMNOTES_EDIT = "Add / edit note for hovered item"
-BINDING_NAME_ITEMNOTES_TOGGLE = "Open Item Notes window"
+BINDING_HEADER_ITEMNOTES = ns.title
+BINDING_NAME_ITEMNOTES_EDIT = L["Add / edit note for hovered item"]
+BINDING_NAME_ITEMNOTES_TOGGLE = L["Open Item Notes window"]
 
-local defaults = {}
+local DB_VERSION = 1
+local MAX_ID = 2147483647
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -24,10 +27,26 @@ local function PublicString(value)
     return not IsSecret(value) and type(value) == "string"
 end
 
+-- True for a positive whole number small enough to be an item or quest ID.
+local function IsID(value)
+    return PublicNumber(value) and value > 0 and value <= MAX_ID and value % 1 == 0
+end
+
 ns.PublicNumber = PublicNumber
+ns.IsID = IsID
 
 function ns.Print(message)
     print("|cffffd100" .. ns.title .. ":|r " .. tostring(message))
+end
+
+-- Runs fn. An error goes to the game's error handler (so it is still reported) instead of aborting the caller.
+-- Returns true when fn finished without an error.
+function ns.Try(fn)
+    return (xpcall(fn, geterrorhandler()))
+end
+
+function ns.InCombat()
+    return InCombatLockdown ~= nil and InCombatLockdown()
 end
 
 function ns.Trim(text)
@@ -51,6 +70,19 @@ function ns.ItemInfo(itemID)
         if instant then icon = select(5, instant(itemID)) end
     end
     return name, link, quality, icon
+end
+
+-- Whether the client knows an item with this ID. Answers from the local item database, without a server request.
+function ns.ItemExists(itemID)
+    if not IsID(itemID) then return false end
+    local instant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+    if not instant then return true end
+    return instant(itemID) ~= nil
+end
+
+-- The item's name, or a placeholder while it is not known.
+function ns.ItemName(itemID, name)
+    return name or L["Item #%d"]:format(itemID)
 end
 
 function ns.MapName(mapID)
@@ -87,7 +119,7 @@ function ns.LocationText(loc)
     if loc.subzone and loc.subzone ~= "" and loc.subzone ~= loc.zone then
         text = text ~= "" and (text .. " - " .. loc.subzone) or loc.subzone
     end
-    if text == "" then text = ns.MapName(loc.mapID) or "Unknown" end
+    if text == "" then text = ns.MapName(loc.mapID) or L["Unknown"] end
     if loc.x and loc.y then
         text = text .. string.format(" (%.1f, %.1f)", loc.x * 100, loc.y * 100)
     end
@@ -97,12 +129,13 @@ end
 -- Where, when and by whom a note was recorded, one fact per line.
 -- short drops the realm from the character name, for narrow panes.
 function ns.RecordedText(note, short)
-    local lines = { "Recorded in " .. ns.LocationText(note.loc) }
+    local lines = { L["Recorded in %s"]:format(ns.LocationText(note.loc)) }
     local who = note.char
     if who and short then who = who:match("^(.-) %- ") or who end
-    lines[2] = ns.FormatTime(note.created) .. (who and ("  by " .. who) or "")
+    local when = ns.FormatTime(note.created)
+    lines[2] = who and L["%s  by %s"]:format(when, who) or when
     if note.updated and note.updated ~= note.created then
-        lines[3] = "Edited " .. ns.FormatTime(note.updated)
+        lines[3] = L["Edited %s"]:format(ns.FormatTime(note.updated))
     end
     return table.concat(lines, "\n")
 end
@@ -117,42 +150,43 @@ function ns.ItemRefLabel(ref)
     local name, _, quality = ns.ItemInfo(ref.id)
     if name then ref.name = name end
     if quality then ref.quality = quality end
-    local plain = ref.name or ("Item #" .. ref.id)
+    local plain = ns.ItemName(ref.id, ref.name)
     local color = ref.quality and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[ref.quality]
     return ((color and color.hex) or "|cffffffff") .. plain .. "|r", plain
+end
+
+-- Inserts a link into the chat box that is currently open. Returns false when there is none.
+function ns.InsertChatLink(link)
+    local insert = (ChatFrameUtil and ChatFrameUtil.InsertLink) or ChatEdit_InsertLink
+    if not insert then return false end
+    local ok, result = pcall(insert, link)
+    return ok and result == true
 end
 
 -- Puts the item's link into the chat input: into the open chat box if there is one, otherwise opens chat with it.
 function ns.LinkInChat(itemID)
     local _, link = ns.ItemInfo(itemID)
     if not link then
-        ns.Print("Item data is still loading. Try again in a moment.")
+        ns.Print(L["Item data is still loading. Try again in a moment."])
         return
     end
-    local insert = (ChatFrameUtil and ChatFrameUtil.InsertLink) or ChatEdit_InsertLink
-    local inserted = false
-    if insert then
-        local ok, result = pcall(insert, link)
-        inserted = ok and result == true
-    end
-    if not inserted then
-        local open = (ChatFrameUtil and ChatFrameUtil.OpenChat) or ChatFrame_OpenChat
-        if not (open and pcall(open, link)) then ns.Print(link) end
-    end
+    if ns.InsertChatLink(link) then return end
+    local open = (ChatFrameUtil and ChatFrameUtil.OpenChat) or ChatFrame_OpenChat
+    if not (open and pcall(open, link)) then ns.Print(link) end
 end
 
 -- Pins the item's tooltip on screen, like clicking an item link in chat.
 function ns.ViewItem(itemID)
-    local ok = pcall(function()
+    local shown = ns.Try(function()
         ShowUIPanel(ItemRefTooltip)
         if not ItemRefTooltip:IsShown() then ItemRefTooltip:SetOwner(UIParent, "ANCHOR_PRESERVE") end
         ItemRefTooltip:SetHyperlink("item:" .. itemID)
     end)
-    if not ok then ns.Print("Could not show item " .. itemID .. ".") end
+    if not shown then ns.Print(L["Could not show item %d."]:format(itemID)) end
 end
 
 function ns.PinLabel(pin)
-    local name = pin.name or ns.MapName(pin.mapID) or ("Map " .. tostring(pin.mapID))
+    local name = pin.name or ns.MapName(pin.mapID) or L["Map %s"]:format(tostring(pin.mapID))
     return string.format("%s (%.1f, %.1f)", name, pin.x * 100, pin.y * 100)
 end
 
@@ -170,6 +204,10 @@ function ns.QuestTitle(questID)
         end
     end
     return PublicString(title) and title ~= "" and title or nil
+end
+
+function ns.QuestLabel(quest)
+    return quest.title or L["Quest #%d"]:format(quest.id)
 end
 
 function ns.QuestLogQuests()
@@ -193,6 +231,7 @@ function ns.QuestLogQuests()
     return quests
 end
 
+-- Returns a description of the quest's state and, when it is in the quest log, its log index.
 function ns.QuestStatus(questID)
     local index
     if C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
@@ -200,29 +239,34 @@ function ns.QuestStatus(questID)
     elseif GetQuestLogIndexByID then
         index = GetQuestLogIndexByID(questID)
     end
-    if index and index > 0 then return "in your quest log", index end
+    if index and index > 0 then return L["in your quest log"], index end
     if C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted and C_QuestLog.IsQuestFlaggedCompleted(questID) then
-        return "completed"
+        return L["completed"]
     end
-    return "not in your quest log"
+    return L["not in your quest log"]
+end
+
+-- Opens the quest log at the quest. Returns false when this client has no quest log UI we know.
+local function ShowQuestInLog(questID, index)
+    if QuestMapFrame_OpenToQuestDetails then
+        QuestMapFrame_OpenToQuestDetails(questID)
+        return true
+    elseif QuestLogFrame then
+        ShowUIPanel(QuestLogFrame)
+        if QuestLog_SetSelection then QuestLog_SetSelection(index) end
+        return true
+    end
+    return false
 end
 
 function ns.OpenQuest(quest)
     local status, index = ns.QuestStatus(quest.id)
     if index then
-        local ok = pcall(function()
-            if QuestMapFrame_OpenToQuestDetails then
-                QuestMapFrame_OpenToQuestDetails(quest.id)
-            elseif QuestLogFrame then
-                ShowUIPanel(QuestLogFrame)
-                if QuestLog_SetSelection then QuestLog_SetSelection(index) end
-            else
-                error("no quest log UI")
-            end
-        end)
-        if ok then return end
+        local shown = false
+        ns.Try(function() shown = ShowQuestInLog(quest.id, index) end)
+        if shown then return end
     end
-    ns.Print(string.format("%s (quest %d) is %s.", quest.title or "Quest", quest.id, status))
+    ns.Print(L["%s (quest %d) is %s."]:format(quest.title or L["Quest"], quest.id, status))
 end
 
 -- ---------------------------------------------------------------------------
@@ -231,18 +275,23 @@ end
 
 function ns.OpenPin(pin)
     local label = ns.PinLabel(pin)
-    pcall(function()
-        if TomTom and TomTom.AddWaypoint then
-            TomTom:AddWaypoint(pin.mapID, pin.x, pin.y, { title = pin.title or label, from = ns.title })
-        elseif C_Map and C_Map.SetUserWaypoint and UiMapPoint
-            and (not C_Map.CanSetUserWaypointOnMap or C_Map.CanSetUserWaypointOnMap(pin.mapID)) then
+    local title = pin.title or label
+    if TomTom and TomTom.AddWaypoint then
+        -- Third-party API: its failures must not stop the map from opening.
+        pcall(function()
+            if TomTom.WaypointExists and TomTom:WaypointExists(pin.mapID, pin.x, pin.y, title) then return end
+            TomTom:AddWaypoint(pin.mapID, pin.x, pin.y, { title = title, from = ns.title })
+        end)
+    elseif C_Map and C_Map.SetUserWaypoint and UiMapPoint then
+        ns.Try(function()
+            if C_Map.CanSetUserWaypointOnMap and not C_Map.CanSetUserWaypointOnMap(pin.mapID) then return end
             C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(pin.mapID, pin.x, pin.y))
             if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then
                 C_SuperTrack.SetSuperTrackedUserWaypoint(true)
             end
-        end
-    end)
-    local opened = pcall(function()
+        end)
+    end
+    local opened = ns.Try(function()
         if OpenWorldMap then
             OpenWorldMap(pin.mapID)
         else
@@ -250,7 +299,7 @@ function ns.OpenPin(pin)
             WorldMapFrame:SetMapID(pin.mapID)
         end
     end)
-    if not opened then ns.Print("Location: " .. label) end
+    if not opened then ns.Print(L["Location: %s"]:format(label)) end
 end
 
 -- Returns a pin for the Blizzard map waypoint (ctrl-click on the world map), if the client has one.
@@ -275,6 +324,80 @@ end
 
 local function FireChanged()
     for _, callback in ipairs(listeners) do callback() end
+end
+
+local function StringOrNil(value)
+    return type(value) == "string" and value or nil
+end
+
+local function NumberOrNil(value)
+    return type(value) == "number" and value or nil
+end
+
+-- Returns list itself when every entry passes validate, otherwise a copy without the bad entries.
+local function CleanList(list, validate)
+    if type(list) ~= "table" then return {} end
+    local clean
+    for index, entry in ipairs(list) do
+        local valid = type(entry) == "table" and validate(entry)
+        if clean then
+            if valid then clean[#clean + 1] = entry end
+        elseif not valid then
+            clean = {}
+            for kept = 1, index - 1 do clean[kept] = list[kept] end
+        end
+    end
+    return clean or list
+end
+
+local function ValidQuestRef(quest)
+    quest.title = StringOrNil(quest.title)
+    return IsID(quest.id)
+end
+
+local function ValidPinRef(pin)
+    pin.name, pin.title = StringOrNil(pin.name), StringOrNil(pin.title)
+    return type(pin.mapID) == "number" and type(pin.x) == "number" and type(pin.y) == "number"
+end
+
+local function ValidItemRef(item)
+    item.name, item.quality = StringOrNil(item.name), NumberOrNil(item.quality)
+    return IsID(item.id)
+end
+
+-- Makes sure every stored note has the shape the UI expects, so a damaged or hand-edited saved-variables file
+-- cannot cause errors later. Entries that are not notes at all are moved to db.invalid rather than deleted.
+local function SanitizeNotes(db)
+    local invalid
+    for itemID, note in pairs(db.notes) do
+        if IsID(itemID) and type(note) == "table" then
+            note.text = type(note.text) == "string" and note.text or ""
+            note.created, note.updated = NumberOrNil(note.created), NumberOrNil(note.updated)
+            note.char, note.name = StringOrNil(note.char), StringOrNil(note.name)
+            note.quality = NumberOrNil(note.quality)
+            if type(note.icon) ~= "number" and type(note.icon) ~= "string" then note.icon = nil end
+            if type(note.loc) ~= "table" then
+                note.loc = nil
+            else
+                local loc = note.loc
+                loc.zone, loc.subzone = StringOrNil(loc.zone), StringOrNil(loc.subzone)
+                loc.mapID, loc.x, loc.y = NumberOrNil(loc.mapID), NumberOrNil(loc.x), NumberOrNil(loc.y)
+            end
+            note.quests = CleanList(note.quests, ValidQuestRef)
+            note.pins = CleanList(note.pins, ValidPinRef)
+            note.items = CleanList(note.items, ValidItemRef)
+        else
+            invalid = invalid or {}
+            invalid[#invalid + 1] = itemID
+        end
+    end
+    if invalid then
+        if type(db.invalid) ~= "table" then db.invalid = {} end
+        for _, key in ipairs(invalid) do
+            db.invalid[tostring(key)] = db.notes[key]
+            db.notes[key] = nil
+        end
+    end
 end
 
 function ns.GetNote(itemID)
@@ -319,7 +442,7 @@ function ns.DeleteNote(itemID)
 end
 
 StaticPopupDialogs["ITEMNOTES_DELETE"] = {
-    text = "Delete the note for %s?",
+    text = L["Delete the note for %s?"],
     button1 = YES,
     button2 = NO,
     OnAccept = function(_, itemID) ns.DeleteNote(itemID) end,
@@ -332,7 +455,7 @@ StaticPopupDialogs["ITEMNOTES_DELETE"] = {
 function ns.ConfirmDelete(itemID)
     local note = ns.GetNote(itemID)
     if not note then return end
-    StaticPopup_Show("ITEMNOTES_DELETE", note.name or ("item " .. itemID), nil, itemID)
+    StaticPopup_Show("ITEMNOTES_DELETE", ns.ItemName(itemID, note.name), nil, itemID)
 end
 
 -- ---------------------------------------------------------------------------
@@ -344,7 +467,7 @@ local function AddNoteLines(tooltip, itemID)
     local note = ns.GetNote(itemID)
     if not note or not note.text or note.text == "" then return end
     tooltip:AddLine(" ")
-    tooltip:AddLine("Item Note", 1, 0.82, 0)
+    tooltip:AddLine(L["Item Note"], 1, 0.82, 0)
     tooltip:AddLine(note.text, 1, 1, 1, true)
 end
 
@@ -354,6 +477,7 @@ end
 
 local function OnTooltipData(tooltip, data)
     if not ns.db or not tooltip or not tooltip.AddLine then return end
+    if tooltip.IsForbidden and tooltip:IsForbidden() then return end
     local itemID = data and PublicNumber(data.id) and data.id
     if itemID then AddNoteLines(tooltip, itemID) end
 end
@@ -407,7 +531,7 @@ function ItemNotes_EditHovered()
     if not ns.db then return end
     local itemID = ns.HoveredItem()
     if not itemID then
-        ns.Print("Hover over an item first, then press the keybind.")
+        ns.Print(L["Hover over an item first, then press the keybind."])
         return
     end
     ns.OpenEditor(itemID)
@@ -435,31 +559,36 @@ SlashCmdList.ITEMNOTES = function(message)
         ns.OpenOptions()
         return
     end
-    -- "/inote <item link or ID>" opens the editor for that item.
-    local itemID = tonumber(input:match("item:(%d+)")) or tonumber(input)
-    if itemID and itemID > 0 then
+    -- "/inote <item link or ID>" opens the editor for that item. Only plain digits count as an ID.
+    local idText = input:match("item:(%d+)") or input:match("^%d+$")
+    if not idText then
+        ItemNotes_Toggle()
+        return
+    end
+    local itemID = tonumber(idText)
+    if ns.ItemExists(itemID) then
         ns.OpenEditor(itemID)
     else
-        ItemNotes_Toggle()
+        ns.Print(L["There is no item with ID %s."]:format(idText))
     end
 end
 
 local events = CreateFrame("Frame")
 events:RegisterEvent("ADDON_LOADED")
 events:RegisterEvent("GET_ITEM_INFO_RECEIVED")
-events:SetScript("OnEvent", function(_, event, arg1)
+events:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" then
         if arg1 ~= addonName then return end
+        self:UnregisterEvent("ADDON_LOADED")
         if type(ItemNotesDB) ~= "table" then ItemNotesDB = {} end
         local db = ItemNotesDB
-        db.version = db.version or 1
         if type(db.notes) ~= "table" then db.notes = {} end
-        if type(db.settings) ~= "table" then db.settings = {} end
-        for key, value in pairs(defaults) do
-            if db.settings[key] == nil then db.settings[key] = value end
-        end
+        SanitizeNotes(db)
+        -- Never held anything; dropped from the schema.
+        db.settings = nil
+        db.version = DB_VERSION
         ns.db = db
-    elseif ns.db and PublicNumber(arg1) then
+    elseif event == "GET_ITEM_INFO_RECEIVED" and ns.db and PublicNumber(arg1) then
         -- Item data arrived from the server: fill in the cached name/icon for notes that lacked it.
         local note = ns.db.notes[arg1]
         if note and not note.name then

@@ -1,42 +1,55 @@
 local _, ns = ...
+local L = ns.L
 
 local browser
 local selectedID
 local sortMode = "recent"
-local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
-local SORT_LABELS = { recent = "Sort: Recent", name = "Sort: Name", zone = "Sort: Zone" }
-local MIN_WIDTH, MIN_HEIGHT = 760, 440
+local SORT_LABELS = { recent = L["Sort: Recent"], name = L["Sort: Name"], zone = L["Sort: Zone"] }
 local SORT_NEXT = { recent = "name", name = "zone", zone = "recent" }
+local MIN_WIDTH, MIN_HEIGHT = 760, 440
+local SEARCH_DELAY = 0.15
+
+-- Items whose data was already requested from the server this session, so a refresh does not ask again.
+local requested = {}
 
 local function Matches(entry, filter)
     if filter == "" then return true end
     local note = entry.note
     local haystack = { entry.name, note.text or "", ns.LocationText(note.loc), note.char or "", tostring(entry.id) }
-    for _, quest in ipairs(note.quests or {}) do haystack[#haystack + 1] = quest.title or "" end
-    for _, pin in ipairs(note.pins or {}) do haystack[#haystack + 1] = ns.PinLabel(pin) end
-    for _, item in ipairs(note.items or {}) do haystack[#haystack + 1] = item.name or "" end
+    for _, quest in ipairs(note.quests) do haystack[#haystack + 1] = quest.title or "" end
+    for _, pin in ipairs(note.pins) do haystack[#haystack + 1] = ns.PinLabel(pin) end
+    for _, item in ipairs(note.items) do haystack[#haystack + 1] = item.name or "" end
     return table.concat(haystack, "\n"):lower():find(filter, 1, true) ~= nil
 end
 
+local function CompareEntries(a, b)
+    if sortMode == "name" and a.name ~= b.name then return a.name < b.name end
+    if sortMode == "zone" and a.zone ~= b.zone then return a.zone < b.zone end
+    local ta, tb = a.note.updated or 0, b.note.updated or 0
+    if ta ~= tb then return ta > tb end
+    return a.id < b.id
+end
+
+-- Returns the notes matching the search box, sorted, and the total number of notes.
 local function BuildEntries()
     local filter = ns.Trim(browser.search:GetText()):lower()
-    local entries = {}
+    local byZone = sortMode == "zone"
+    local entries, total = {}, 0
     for itemID, note in pairs(ns.db.notes) do
-        if not note.name then ns.CacheItemInfo(itemID, note) end
-        local entry = { id = itemID, note = note, name = note.name or ("Item #" .. itemID) }
-        if Matches(entry, filter) then entries[#entries + 1] = entry end
-    end
-    table.sort(entries, function(a, b)
-        if sortMode == "name" and a.name ~= b.name then return a.name < b.name end
-        if sortMode == "zone" then
-            local za, zb = ns.LocationText(a.note.loc), ns.LocationText(b.note.loc)
-            if za ~= zb then return za < zb end
+        total = total + 1
+        if not note.name and not requested[itemID] then
+            requested[itemID] = true
+            ns.CacheItemInfo(itemID, note)
         end
-        local ta, tb = a.note.updated or 0, b.note.updated or 0
-        if ta ~= tb then return ta > tb end
-        return a.id < b.id
-    end)
-    return entries
+        local entry = { id = itemID, note = note, name = ns.ItemName(itemID, note.name) }
+        if Matches(entry, filter) then
+            -- The sort key is built once per entry, not once per comparison.
+            if byZone then entry.zone = ns.LocationText(note.loc) end
+            entries[#entries + 1] = entry
+        end
+    end
+    table.sort(entries, CompareEntries)
+    return entries, total
 end
 
 -- ---------------------------------------------------------------------------
@@ -48,17 +61,24 @@ local function RefreshDetail()
     local note = selectedID and ns.GetNote(selectedID)
     detail.body:SetShown(note ~= nil)
     detail.placeholder:SetShown(note == nil)
-    if not note then return end
+    if not note then
+        detail.shownID = nil
+        return
+    end
 
-    detail.icon.texture:SetTexture(note.icon or select(4, ns.ItemInfo(selectedID)) or FALLBACK_ICON)
-    detail.name:SetText(note.name or ("Item #" .. selectedID))
+    detail.icon.texture:SetTexture(note.icon or select(4, ns.ItemInfo(selectedID)) or ns.FALLBACK_ICON)
+    detail.name:SetText(ns.ItemName(selectedID, note.name))
     detail.name:SetTextColor(ns.QualityColor(note.quality))
-    detail.meta:SetText("Item ID " .. selectedID)
+    detail.meta:SetText(L["Item ID %d"]:format(selectedID))
 
     local text = note.text or ""
-    detail.noteText:SetText(text ~= "" and text or "|cff8f949f(no text)|r")
+    detail.noteText:SetText(text ~= "" and text or ("|cff8f949f" .. L["(no text)"] .. "|r"))
     detail.FitNote()
-    detail.noteScroll:ScrollTo(0)
+    -- Back to the top only when a different note is shown, not on every refresh of the same one.
+    if detail.shownID ~= selectedID then
+        detail.shownID = selectedID
+        detail.noteScroll:ScrollTo(0)
+    end
 
     local refs = ns.RefItems(note.quests, note.pins, note.items)
     detail.refs:SetItems(refs)
@@ -70,7 +90,7 @@ local function CreateDetail(parent)
     local detail = ns.CreatePanel(parent)
     detail.placeholder = ns.Text(detail, "normal", "muted")
     detail.placeholder:SetPoint("CENTER")
-    detail.placeholder:SetText("Select a note to see it here.")
+    detail.placeholder:SetText(L["Select a note to see it here."])
 
     local body = CreateFrame("Frame", nil, detail)
     body:SetAllPoints()
@@ -98,7 +118,7 @@ local function CreateDetail(parent)
     local chatLink = ns.CreateChatLinkButton(body, function() return selectedID end)
     chatLink:SetPoint("LEFT", wowhead, "RIGHT", 4, 0)
 
-    local noteLabel = ns.Caption(body, "Note")
+    local noteLabel = ns.Caption(body, L["Note"])
     noteLabel:SetPoint("TOPLEFT", 12, -92)
 
     -- The note keeps a fixed, modest height (it scrolls); spare height goes to the references list.
@@ -123,7 +143,7 @@ local function CreateDetail(parent)
     end
     detail.noteScroll:HookScript("OnSizeChanged", detail.FitNote)
 
-    local refLabel = ns.Caption(body, "References")
+    local refLabel = ns.Caption(body, L["References"])
     refLabel:SetPoint("TOPLEFT", 12, -186)
 
     local refPanel
@@ -133,7 +153,7 @@ local function CreateDetail(parent)
 
     detail.noRefs = ns.Text(refPanel, "small", "muted")
     detail.noRefs:SetPoint("CENTER")
-    detail.noRefs:SetText("No items, quests or map locations attached.")
+    detail.noRefs:SetText(L["No items, quests or map locations attached."])
 
     detail.recorded = ns.Text(body, "small", "muted")
     detail.recorded:SetPoint("BOTTOMLEFT", 12, 44)
@@ -143,14 +163,14 @@ local function CreateDetail(parent)
     -- Never grow past the space reserved above the buttons, however narrow the pane gets.
     if detail.recorded.SetMaxLines then detail.recorded:SetMaxLines(3) end
 
-    local edit = ns.CreateButton(body, "Edit note", 100, function()
+    local edit = ns.CreateButton(body, L["Edit note"], 100, function()
         if selectedID then ns.OpenEditor(selectedID) end
-    end, "primary")
+    end)
     edit:SetPoint("BOTTOMRIGHT", -12, 12)
 
-    local delete = ns.CreateButton(body, "Delete note", 100, function()
+    local delete = ns.CreateButton(body, L["Delete note"], 100, function()
         if selectedID then ns.ConfirmDelete(selectedID) end
-    end, "danger")
+    end)
     delete:SetPoint("BOTTOMLEFT", 12, 12)
 
     return detail
@@ -164,18 +184,37 @@ local function Refresh()
     -- browser.detail is created last, so this also skips refreshes fired while the window is being built.
     if not browser or not browser.detail or not browser:IsShown() then return end
     if selectedID and not ns.GetNote(selectedID) then selectedID = nil end
-    local entries = BuildEntries()
+    local entries, total = BuildEntries()
     browser.list:SetItems(entries)
-    local total = 0
-    for _ in pairs(ns.db.notes) do total = total + 1 end
     if total == 0 then
-        browser.empty:SetText("No notes yet.\n\nHover over an item and press your\nItem Notes keybind, or drag an item here.")
+        browser.empty:SetText(L["No notes yet.\n\nHover over an item and press your\nItem Notes keybind, or drag an item here."])
     else
-        browser.empty:SetText("No notes match your search.")
+        browser.empty:SetText(L["No notes match your search."])
     end
     browser.empty:SetShown(#entries == 0)
-    browser.count:SetText(#entries == total and (total .. (total == 1 and " note" or " notes"))
-        or (#entries .. " of " .. total))
+    if #entries == total then
+        browser.count:SetText((total == 1 and L["%d note"] or L["%d notes"]):format(total))
+    else
+        browser.count:SetText(L["%d of %d"]:format(#entries, total))
+    end
+    RefreshDetail()
+end
+
+-- Typing in the search box refreshes once the typing pauses, not on every keystroke.
+local searchPending = false
+local function OnSearchChanged()
+    if searchPending then return end
+    searchPending = true
+    C_Timer.After(SEARCH_DELAY, function()
+        searchPending = false
+        Refresh()
+    end)
+end
+
+-- Selecting a note changes no data: only the highlight and the detail pane need updating.
+local function Select(itemID)
+    selectedID = itemID
+    browser.list:Redraw()
     RefreshDetail()
 end
 
@@ -229,14 +268,15 @@ local function InitRow(row)
         local entry = self.item
         if not entry or TakeCursorItem() then return end
         if IsModifiedClick and IsModifiedClick("CHATLINK") then
-            local _, link = ns.ItemInfo(entry.id)
-            local insert = (ChatFrameUtil and ChatFrameUtil.InsertLink) or ChatEdit_InsertLink
-            if link and insert then insert(link) end
+            -- While the editor is open, a shift-click attaches the item to the note being edited instead.
+            if not ns.IsEditorOpen() then
+                local _, link = ns.ItemInfo(entry.id)
+                if link then ns.InsertChatLink(link) end
+            end
             return
         end
-        selectedID = entry.id
         if button == "RightButton" then ns.OpenEditor(entry.id) end
-        Refresh()
+        Select(entry.id)
     end)
     row:SetScript("OnDoubleClick", function(self)
         if self.item then ns.OpenEditor(self.item.id) end
@@ -248,26 +288,64 @@ local function InitRow(row)
     row:SetScript("OnLeave", GameTooltip_Hide)
 end
 
+local function Plural(count, one, many)
+    return (count == 1 and one or many):format(count)
+end
+
 local function UpdateRow(row, entry)
     local note = entry.note
-    row.icon.texture:SetTexture(note.icon or select(4, ns.ItemInfo(entry.id)) or FALLBACK_ICON)
+    row.icon.texture:SetTexture(note.icon or select(4, ns.ItemInfo(entry.id)) or ns.FALLBACK_ICON)
     row.name:SetText(entry.name)
     row.name:SetTextColor(ns.QualityColor(note.quality))
+
     local text = (note.text or ""):gsub("%s+", " ")
-    local quests, pins = #(note.quests or {}), #(note.pins or {})
-    local refs = {}
-    local items = #(note.items or {})
-    if items > 0 then refs[#refs + 1] = items .. (items == 1 and " item" or " items") end
-    if quests > 0 then refs[#refs + 1] = quests .. (quests == 1 and " quest" or " quests") end
-    if pins > 0 then refs[#refs + 1] = pins .. (pins == 1 and " location" or " locations") end
-    if #refs > 0 then
+    local items, quests, pins = #note.items, #note.quests, #note.pins
+    if items + quests + pins > 0 then
+        local refs = {}
+        if items > 0 then refs[#refs + 1] = Plural(items, L["%d item"], L["%d items"]) end
+        if quests > 0 then refs[#refs + 1] = Plural(quests, L["%d quest"], L["%d quests"]) end
+        if pins > 0 then refs[#refs + 1] = Plural(pins, L["%d location"], L["%d locations"]) end
         text = "|cff66b8ff" .. table.concat(refs, ", ") .. "|r  " .. text
     end
     row.text:SetText(text)
     row.when:SetText(date("%Y-%m-%d", note.updated or note.created or 0))
+
     local isSelected = entry.id == selectedID
     row.selected:SetShown(isSelected)
     row.marker:SetShown(isSelected)
+end
+
+-- Remembers the window's size and position across sessions.
+local function SaveLayout()
+    local point, _, relativePoint, x, y = browser:GetPoint(1)
+    ns.db.window = {
+        width = math.floor(browser:GetWidth() + 0.5),
+        height = math.floor(browser:GetHeight() + 0.5),
+        point = point,
+        relativePoint = relativePoint,
+        x = x,
+        y = y,
+    }
+end
+
+local function RestoreLayout()
+    local saved = ns.db.window
+    if type(saved) ~= "table" then return end
+    if type(saved.width) == "number" and type(saved.height) == "number" then
+        browser:SetSize(math.max(MIN_WIDTH, saved.width), math.max(MIN_HEIGHT, saved.height))
+    end
+    if type(saved.point) == "string" and type(saved.relativePoint) == "string"
+        and type(saved.x) == "number" and type(saved.y) == "number" then
+        -- A bad anchor name in the saved data must not stop the window from opening.
+        local placed = pcall(function()
+            browser:ClearAllPoints()
+            browser:SetPoint(saved.point, UIParent, saved.relativePoint, saved.x, saved.y)
+        end)
+        if not placed then
+            browser:ClearAllPoints()
+            browser:SetPoint("CENTER")
+        end
+    end
 end
 
 local function CreateBrowser()
@@ -275,22 +353,18 @@ local function CreateBrowser()
     browser:SetPoint("CENTER")
     table.insert(UISpecialFrames, "ItemNotesBrowser")
 
-    -- Resizable from the bottom-right corner; the size is remembered. The detail pane takes the extra width.
-    local saved = ns.db.window
-    if type(saved) == "table" and saved.width and saved.height then
-        browser:SetSize(math.max(MIN_WIDTH, saved.width), math.max(MIN_HEIGHT, saved.height))
-    end
-    ns.MakeResizable(browser, MIN_WIDTH, MIN_HEIGHT, function(width, height)
-        ns.db.window = { width = math.floor(width + 0.5), height = math.floor(height + 0.5) }
-    end)
+    -- Movable, and resizable from the bottom-right corner. The detail pane takes the extra width.
+    RestoreLayout()
+    ns.MakeResizable(browser, MIN_WIDTH, MIN_HEIGHT, SaveLayout)
+    browser:HookScript("OnDragStop", SaveLayout)
     browser:SetScript("OnReceiveDrag", TakeCursorItem)
     browser:SetScript("OnMouseUp", TakeCursorItem)
 
     -- The portrait occupies the top-left corner, so the search box starts to its right.
     local searchLeft = browser.hasPortrait and 68 or 20
-    browser.search = ns.CreateInput(browser, 160, "Search", true)
+    browser.search = ns.CreateInput(browser, 160, L["Search"], true)
     browser.search:SetPoint("TOPLEFT", searchLeft, -34)
-    browser.search:HookScript("OnTextChanged", Refresh)
+    browser.search:HookScript("OnTextChanged", OnSearchChanged)
 
     browser.sort = ns.CreateButton(browser, SORT_LABELS[sortMode], 104, function(self)
         sortMode = SORT_NEXT[sortMode]
@@ -323,7 +397,7 @@ local function CreateBrowser()
     browser.empty:SetPoint("CENTER")
     browser.empty:SetJustifyH("CENTER")
 
-    local options = ns.CreateButton(browser, "Options", 90, function() ns.OpenOptions() end)
+    local options = ns.CreateButton(browser, L["Options"], 90, function() ns.OpenOptions() end)
     options:SetPoint("BOTTOMLEFT", 14, 14)
 
     browser.count = ns.Text(browser, "small", "muted")
@@ -334,7 +408,7 @@ local function CreateBrowser()
     hint:SetPoint("LEFT", options, "RIGHT", 10, 0)
     hint:SetPoint("RIGHT", browser.count, "LEFT", -10, 0)
     hint:SetWordWrap(false)
-    hint:SetText("Double-click to edit. Drag an item here to add a note.")
+    hint:SetText(L["Double-click to edit. Drag an item here to add a note."])
 
     browser.detail = CreateDetail(browser)
     browser.detail:SetPoint("TOPLEFT", panel, "TOPRIGHT", 12, 32)

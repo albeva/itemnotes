@@ -27,6 +27,8 @@ While the editor is open:
 - **Drag** an item onto the window to attach it
 - **Add My Location** / **Add Map Pin** attach a map location
 
+Closing the editor with Escape keeps unsaved changes: open the same item again to continue. **Cancel** discards them.
+
 ### See it in the tooltip
 
 ![Tooltip](screenshots/tooltip.png)

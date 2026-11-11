@@ -1,4 +1,5 @@
 local _, ns = ...
+local L = ns.L
 
 -- Thin wrappers around Blizzard's own frame templates, so the addon looks like the rest of the game UI.
 -- Each wrapper falls back to an older template when the client does not have the newer one.
@@ -108,6 +109,7 @@ end
 
 function ns.SetWindowPortrait(frame, texture)
     if not frame.hasPortrait then return end
+    -- The portrait API differs between template versions; a missing portrait is only cosmetic.
     pcall(function()
         if frame.SetPortraitToAsset then
             frame:SetPortraitToAsset(texture)
@@ -124,7 +126,7 @@ function ns.CreateWindow(name, parent, width, height, title, portrait)
     local isPortraitFrame = template == "PortraitFrameTemplate"
     frame.hasPortrait = isPortraitFrame and portrait ~= nil
     if isPortraitFrame and not portrait then
-        -- Same thing ButtonFrameTemplate_HidePortrait does.
+        -- Same thing ButtonFrameTemplate_HidePortrait does. Cosmetic, so a template without these is fine.
         pcall(function()
             frame:SetBorder("ButtonFrameTemplateNoPortrait")
             frame:SetPortraitShown(false)
@@ -225,44 +227,84 @@ function ns.CreateScroll(parent)
     return scroll
 end
 
--- A simple scrolling list. Rows are created on demand and reused.
+-- A scrolling list that only keeps frames for the rows currently in view: the number of row frames depends on
+-- the list's height, not on how many items it holds. Rows are re-filled as the list scrolls.
 --   initRow(row)             builds a row's regions once
 --   updateRow(row, item, i)  fills a row from an item
+--   list:SetItems(items)     shows a new set of items
+--   list:Redraw()            re-fills the visible rows from the current items
 function ns.CreateScrollList(parent, rowHeight, initRow, updateRow)
     local scroll = ns.CreateScroll(parent)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetSize(1, 1)
     scroll:SetScrollChild(content)
+
+    local rows, items = {}, {}
+    local rendering = false
+
+    local function Render()
+        -- Clamping the scroll position below fires OnVerticalScroll, which would re-enter.
+        if rendering then return end
+
+        local height = scroll:GetHeight() or 0
+        local offset = scroll:GetVerticalScroll() or 0
+        local maxOffset = math.max(0, #items * rowHeight - height)
+        if offset > maxOffset then
+            offset = maxOffset
+            rendering = true
+            scroll:SetVerticalScroll(offset)
+            rendering = false
+        end
+
+        local first = math.floor(offset / rowHeight) + 1
+        local visible = math.ceil(height / rowHeight) + 1
+        for slot = 1, visible do
+            local index = first + slot - 1
+            local item = items[index]
+            local row = rows[slot]
+            if item then
+                if not row then
+                    row = CreateFrame("Button", nil, content)
+                    row:SetHeight(rowHeight)
+                    initRow(row)
+                    rows[slot] = row
+                end
+                if row.index ~= index then
+                    row.index = index
+                    row:ClearAllPoints()
+                    row:SetPoint("TOPLEFT", 0, -(index - 1) * rowHeight)
+                    row:SetPoint("TOPRIGHT", 0, -(index - 1) * rowHeight)
+                end
+                row.item = item
+                updateRow(row, item, index)
+                row:Show()
+            elseif row then
+                row.item = nil
+                row:Hide()
+            end
+        end
+        for slot = visible + 1, #rows do
+            rows[slot].item = nil
+            rows[slot]:Hide()
+        end
+    end
+
+    function scroll:SetItems(newItems)
+        items = newItems
+        content:SetWidth(math.max(1, self:GetWidth()))
+        content:SetHeight(math.max(1, #items * rowHeight))
+        Render()
+    end
+
+    function scroll:Redraw()
+        Render()
+    end
+
     scroll:HookScript("OnSizeChanged", function(self, width)
         content:SetWidth(math.max(1, width or self:GetWidth()))
+        Render()
     end)
-
-    local rows = {}
-    scroll.rows = rows
-    scroll.content = content
-
-    function scroll:SetItems(items)
-        content:SetWidth(math.max(1, self:GetWidth()))
-        for index, item in ipairs(items) do
-            local row = rows[index]
-            if not row then
-                row = CreateFrame("Button", nil, content)
-                row:SetHeight(rowHeight)
-                row:SetPoint("TOPLEFT", 0, -(index - 1) * rowHeight)
-                row:SetPoint("TOPRIGHT", 0, -(index - 1) * rowHeight)
-                initRow(row)
-                rows[index] = row
-            end
-            row.item = item
-            updateRow(row, item, index)
-            row:Show()
-        end
-        for index = #items + 1, #rows do
-            rows[index].item = nil
-            rows[index]:Hide()
-        end
-        content:SetHeight(math.max(1, #items * rowHeight))
-    end
+    scroll:HookScript("OnVerticalScroll", Render)
 
     return scroll
 end
@@ -326,7 +368,7 @@ end
 local copyWindow
 function ns.ShowCopy(url, title)
     if not copyWindow then
-        copyWindow = ns.CreateWindow("ItemNotesCopyWindow", UIParent, 460, 100, "Wowhead link")
+        copyWindow = ns.CreateWindow("ItemNotesCopyWindow", UIParent, 460, 100, L["Wowhead link"])
         copyWindow:SetPoint("CENTER", 0, 120)
         copyWindow:SetFrameStrata("FULLSCREEN_DIALOG")
         table.insert(UISpecialFrames, "ItemNotesCopyWindow")
@@ -342,7 +384,8 @@ function ns.ShowCopy(url, title)
             end
         end)
         edit:SetScript("OnKeyDown", function(_, key)
-            if key == "C" and IsControlKeyDown() then
+            -- Ctrl+C on Windows, Cmd+C on macOS.
+            if key == "C" and (IsControlKeyDown() or (IsMetaKeyDown and IsMetaKeyDown())) then
                 C_Timer.After(0.15, function() copyWindow:Hide() end)
             end
         end)
@@ -352,10 +395,10 @@ function ns.ShowCopy(url, title)
 
         local hint = ns.Text(copyWindow, "small", "muted")
         hint:SetPoint("TOPLEFT", edit, "BOTTOMLEFT", -4, -10)
-        hint:SetText("Press Ctrl+C to copy, then paste it into your web browser.")
+        hint:SetText(L["Press Ctrl+C (Cmd+C on Mac) to copy, then paste it into your web browser."])
     end
     copyWindow.url = url
-    copyWindow.title:SetText(title or "Wowhead link")
+    copyWindow.title:SetText(title or L["Wowhead link"])
     copyWindow.edit:SetText(url)
     copyWindow:Show()
     copyWindow:Raise()
@@ -365,24 +408,24 @@ end
 
 -- A "Wowhead" button for an item. getItemID() returns the item it currently refers to.
 function ns.CreateWowheadButton(parent, getItemID)
-    local button = ns.CreateButton(parent, "Wowhead", 84, function()
+    local button = ns.CreateButton(parent, L["Wowhead"], 84, function()
         local itemID = getItemID()
-        if itemID then ns.ShowCopy(ns.WowheadURL("item", itemID), "Wowhead link") end
+        if itemID then ns.ShowCopy(ns.WowheadURL("item", itemID), L["Wowhead link"]) end
     end)
     button:SetHeight(20)
-    button.tooltipTitle = "Copy this item's Wowhead link"
+    button.tooltipTitle = L["Copy this item's Wowhead link"]
     return button
 end
 
 -- A "Link in Chat" button for an item. getItemID() returns the item it currently refers to.
 function ns.CreateChatLinkButton(parent, getItemID)
-    local button = ns.CreateButton(parent, "Link in Chat", 100, function()
+    local button = ns.CreateButton(parent, L["Link in Chat"], 100, function()
         local itemID = getItemID()
         if itemID then ns.LinkInChat(itemID) end
     end)
     button:SetHeight(20)
-    button.tooltipTitle = "Put this item's link into chat"
-    button.tooltipText = "Uses the open chat box, or opens one."
+    button.tooltipTitle = L["Put this item's link into chat"]
+    button.tooltipText = L["Uses the open chat box, or opens one."]
     return button
 end
 
@@ -403,8 +446,8 @@ function ns.CreateRefList(parent, onRemove, onDrop)
             else
                 -- Full text, in case the row is too narrow to show it all.
                 GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-                GameTooltip:AddLine(item.kind == "quest" and (item.ref.title or ("Quest #" .. item.ref.id))
-                    or ns.PinLabel(item.ref), 1, 1, 1, true)
+                GameTooltip:AddLine(item.kind == "quest" and ns.QuestLabel(item.ref) or ns.PinLabel(item.ref),
+                    1, 1, 1, true)
                 GameTooltip:Show()
             end
         end)
@@ -415,7 +458,7 @@ function ns.CreateRefList(parent, onRemove, onDrop)
                 if row.item then onRemove(row.item) end
             end)
             row.remove:SetPoint("RIGHT", right, 0)
-            row.remove.tooltipTitle = "Remove this reference"
+            row.remove.tooltipTitle = L["Remove this reference"]
             right = right - 24
         end
         row.open = ns.CreateButton(row, "", 58, function()
@@ -423,14 +466,14 @@ function ns.CreateRefList(parent, onRemove, onDrop)
         end)
         row.open:SetHeight(20)
         row.open:SetPoint("RIGHT", right, 0)
-        row.link = ns.CreateButton(row, "Wowhead", 78, function()
+        row.link = ns.CreateButton(row, L["Wowhead"], 78, function()
             local item = row.item
             if not item or item.kind == "pin" then return end
-            ns.ShowCopy(ns.WowheadURL(item.kind, item.ref.id), "Wowhead link")
+            ns.ShowCopy(ns.WowheadURL(item.kind, item.ref.id), L["Wowhead link"])
         end)
         row.link:SetHeight(20)
         row.link:SetPoint("RIGHT", row.open, "LEFT", -2, 0)
-        row.link.tooltipTitle = "Copy Wowhead link"
+        row.link.tooltipTitle = L["Copy Wowhead link"]
         row.text = ns.Text(row, "normal")
         row.text:SetPoint("LEFT", 6, 0)
         row.text:SetPoint("RIGHT", row.link, "LEFT", -8, 0)
@@ -442,20 +485,22 @@ function ns.CreateRefList(parent, onRemove, onDrop)
         row.link:SetShown(item.kind ~= "pin")
         if item.kind == "item" then
             local label, plain = ns.ItemRefLabel(item.ref)
-            row.text:SetText("|cffc8a2ffItem|r  " .. label)
-            row.open:SetText("View")
-            row.open.tooltipTitle = "View item: " .. plain
-            row.open.tooltipText = "Pins the item tooltip on screen."
+            row.text:SetText("|cffc8a2ff" .. L["Item"] .. "|r  " .. label)
+            row.open:SetText(L["View"])
+            row.open.tooltipTitle = L["View item: %s"]:format(plain)
+            row.open.tooltipText = L["Pins the item tooltip on screen."]
         elseif item.kind == "quest" then
-            row.text:SetText("|cffffe066Quest|r  " .. (item.ref.title or ("#" .. item.ref.id)))
-            row.open:SetText("Open")
-            row.open.tooltipTitle = "Open quest: " .. (item.ref.title or ("#" .. item.ref.id))
-            row.open.tooltipText = "Quest ID " .. item.ref.id .. " - " .. ns.QuestStatus(item.ref.id)
+            local label = ns.QuestLabel(item.ref)
+            row.text:SetText("|cffffe066" .. L["Quest"] .. "|r  " .. label)
+            row.open:SetText(L["Open"])
+            row.open.tooltipTitle = L["Open quest: %s"]:format(label)
+            row.open.tooltipText = L["Quest ID %d - %s"]:format(item.ref.id, (ns.QuestStatus(item.ref.id)))
         else
-            row.text:SetText("|cff66b8ffMap|r  " .. ns.PinLabel(item.ref))
-            row.open:SetText("Show")
-            row.open.tooltipTitle = "Show on map: " .. ns.PinLabel(item.ref)
-            row.open.tooltipText = "Opens the world map there and sets a waypoint."
+            local label = ns.PinLabel(item.ref)
+            row.text:SetText("|cff66b8ff" .. L["Map"] .. "|r  " .. label)
+            row.open:SetText(L["Show"])
+            row.open.tooltipTitle = L["Show on map: %s"]:format(label)
+            row.open.tooltipText = L["Opens the world map there and sets a waypoint."]
         end
     end)
 end

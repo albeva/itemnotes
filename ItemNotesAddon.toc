@@ -5,9 +5,13 @@
 ## Version: 1.0.0
 ## IconTexture: Interface\Icons\INV_Misc_Note_01
 ## SavedVariables: ItemNotesDB
+## OptionalDeps: TomTom
 ## AddonCompartmentFunc: ItemNotes_OnAddonCompartmentClick
 ## Category-enUS: Inventory
+## X-License: MIT
+## X-Website: https://github.com/albeva/itemnotes
 
+Core\Locale.lua
 Core\Core.lua
 
 UI\Widgets.lua

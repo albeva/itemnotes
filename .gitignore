@@ -1,0 +1,12 @@
+# Packager output
+.release/
+*.zip
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
