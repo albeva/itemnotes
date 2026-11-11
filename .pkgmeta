@@ -1,9 +1,0 @@
-package-as: ItemNotesAddon
-
-ignore:
-  - README.md
-  - CHANGELOG.md
-  - screenshots
-  - art
-  - .gitignore
-  - .luacheckrc

@@ -1,0 +1,4 @@
+package-as: ItemNotesAddon
+
+ignore:
+  - .luacheckrc

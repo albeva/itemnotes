@@ -83,7 +83,7 @@ Restart the game.
 
 | Path | Contents |
 |---|---|
-| `addon/` | Everything the game loads |
+| `addon/` | Everything the game loads, plus lint and packaging config |
 | `art/` | Icon source (SVG) and a 512px render |
 | `screenshots/` | Images for this page |
 

@@ -1,6 +1,5 @@
 std = "lua51"
 max_line_length = false
-exclude_files = { ".release" }
 
 -- Globals this addon defines.
 globals = {
