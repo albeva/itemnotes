@@ -92,7 +92,9 @@ local function RefreshDetail()
 
     local refs = ns.RefItems(note.quests, note.pins, note.items, note.notes)
     detail.refs:SetItems(refs)
-    detail.noRefs:SetShown(#refs == 0)
+    -- A note without references shows no references section at all.
+    detail.refLabel:SetShown(#refs > 0)
+    detail.refPanel:SetShown(#refs > 0)
     detail.recorded:SetText(ns.RecordedText(note, true))
 end
 
@@ -155,17 +157,13 @@ local function CreateDetail(parent)
     end
     detail.noteScroll:HookScript("OnSizeChanged", detail.FitNote)
 
-    local refLabel = ns.Caption(body, L["References"])
-    refLabel:SetPoint("TOPLEFT", 12, -186)
+    -- Shown only while the note has references.
+    detail.refLabel = ns.Caption(body, L["References"])
+    detail.refLabel:SetPoint("TOPLEFT", 12, -186)
 
-    local refPanel
-    refPanel, detail.refs = ns.CreateRefList(body)
-    refPanel:SetPoint("TOPLEFT", 12, -204)
-    refPanel:SetPoint("BOTTOMRIGHT", -12, 86)
-
-    detail.noRefs = ns.Text(refPanel, "small", "muted")
-    detail.noRefs:SetPoint("CENTER")
-    detail.noRefs:SetText(L["No items, notes, quests or map locations attached."])
+    detail.refPanel, detail.refs = ns.CreateRefList(body)
+    detail.refPanel:SetPoint("TOPLEFT", 12, -204)
+    detail.refPanel:SetPoint("BOTTOMRIGHT", -12, 86)
 
     detail.recorded = ns.Text(body, "small", "muted")
     detail.recorded:SetPoint("BOTTOMLEFT", 12, 44)

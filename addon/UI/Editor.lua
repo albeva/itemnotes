@@ -42,10 +42,9 @@ local function RefreshRefs()
     editor.noRefs:SetShown(#items == 0)
 end
 
--- The count on the item's icon and the Locate button follow what is in the bags.
+-- The count on the item's icon follows what is in the bags.
 local function RefreshBagInfo()
     ns.SetIconCount(editor.icon, editor.itemID)
-    editor.locate:UpdateForItem()
 end
 
 local function RefsChanged()
@@ -291,13 +290,6 @@ local function CreateEditor()
 
     editor.meta = ns.Text(editor, "small", "muted")
     editor.meta:SetPoint("TOPLEFT", editor.name, "BOTTOMLEFT", 0, -4)
-
-    local wowhead = ns.CreateWowheadButton(editor, function() return editor.itemID end)
-    wowhead:SetPoint("LEFT", editor.meta, "RIGHT", 10, 0)
-    local chatLink = ns.CreateChatLinkButton(editor, function() return editor.itemID end)
-    chatLink:SetPoint("LEFT", wowhead, "RIGHT", 4, 0)
-    editor.locate = ns.CreateLocateButton(editor, function() return editor.itemID end)
-    editor.locate:SetPoint("LEFT", chatLink, "RIGHT", 4, 0)
 
     -- Dropping an item anywhere on the window attaches it as a reference.
     editor:SetScript("OnReceiveDrag", TakeCursorItem)

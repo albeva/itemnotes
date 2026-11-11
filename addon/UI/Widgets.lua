@@ -155,42 +155,88 @@ function ns.FitToScreen(frame)
     end
 end
 
-local function SetResizeLimits(frame, minWidth, minHeight, maxWidth, maxHeight)
-    if frame.SetResizeBounds then
-        frame:SetResizeBounds(minWidth, minHeight, maxWidth, maxHeight)
-    else
-        if frame.SetMinResize then frame:SetMinResize(minWidth, minHeight) end
-        if frame.SetMaxResize then frame:SetMaxResize(maxWidth, maxHeight) end
-    end
+local function IsFinite(value)
+    return type(value) == "number" and value == value and value > -math.huge and value < math.huge
+end
+
+local function Clamp(value, low, high)
+    return math.max(low, math.min(high, value))
 end
 
 -- Adds the standard resize grip to the bottom-right corner. onResized(width, height) fires when the drag ends.
--- The window cannot be dragged larger than the room between its top-left corner and the screen's edges.
+-- The drag is tracked here instead of being handed to the game's own sizing: the window's size is always its
+-- size when the grip was pressed plus the distance the mouse has moved since, so it cannot jump. It stays
+-- between minWidth/minHeight and the room between its top-left corner and the screen's edges.
 function ns.MakeResizable(frame, minWidth, minHeight, onResized)
-    frame:SetResizable(true)
-    local function LimitToScreen()
-        local maxWidth, maxHeight = UIParent:GetSize()
-        -- The top-left corner stays put while sizing: what is left is the screen to the right of and below it.
-        local left, top = frame:GetLeft(), frame:GetTop()
-        if left and top then maxWidth, maxHeight = maxWidth - left, top end
-        SetResizeLimits(frame, minWidth, minHeight, math.max(minWidth, maxWidth), math.max(minHeight, maxHeight))
-    end
-    LimitToScreen()
     local grip = CreateFrame("Button", nil, frame)
+    -- Set while the grip is held: where the mouse and the window's size started, and how large it may get.
+    local drag
+
+    -- The mouse position in the window's own units, or nil when the game reports nothing usable.
+    local function CursorPosition()
+        local x, y = GetCursorPosition()
+        local scale = frame:GetEffectiveScale()
+        if not (IsFinite(x) and IsFinite(y) and IsFinite(scale)) or scale <= 0 then return nil end
+        return x / scale, y / scale
+    end
+
+    local function StopDrag()
+        if not drag then return end
+        drag = nil
+        grip:SetScript("OnUpdate", nil)
+        if onResized then onResized(frame:GetSize()) end
+    end
+
+    local function UpdateDrag()
+        -- A release the grip never heard about (the button let go outside the game window, say).
+        if not IsMouseButtonDown("LeftButton") then
+            StopDrag()
+            return
+        end
+        local x, y = CursorPosition()
+        -- Nothing to do until the mouse has actually moved.
+        if not x or (x == drag.lastX and y == drag.lastY) then return end
+        drag.lastX, drag.lastY = x, y
+        -- Screen coordinates grow upwards: moving the mouse down makes the window taller.
+        local width = Clamp(drag.width + (x - drag.startX), minWidth, drag.maxWidth)
+        local height = Clamp(drag.height + (drag.startY - y), minHeight, drag.maxHeight)
+        frame:SetSize(math.floor(width + 0.5), math.floor(height + 0.5))
+    end
+
+    local function StartDrag()
+        if drag or not grip:IsMouseOver() then return end
+        local x, y = CursorPosition()
+        local left, top = frame:GetLeft(), frame:GetTop()
+        local width, height = frame:GetSize()
+        if not x or not (IsFinite(left) and IsFinite(top) and IsFinite(width) and IsFinite(height)) then return end
+
+        -- Hold the top-left corner in place, so a size change moves only the right and bottom edges.
+        frame:ClearAllPoints()
+        frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+
+        -- What is left of the screen to the right of and below that corner, in the window's units.
+        local toFrameUnits = UIParent:GetEffectiveScale() / frame:GetEffectiveScale()
+        drag = {
+            startX = x, startY = y, lastX = x, lastY = y,
+            width = width, height = height,
+            maxWidth = math.max(minWidth, UIParent:GetWidth() * toFrameUnits - left),
+            maxHeight = math.max(minHeight, top),
+        }
+        grip:SetScript("OnUpdate", UpdateDrag)
+    end
+
     grip:SetSize(16, 16)
     grip:SetPoint("BOTTOMRIGHT", -3, 3)
     grip:SetFrameLevel(frame:GetFrameLevel() + 20)
     grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
     grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
     grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-    grip:SetScript("OnMouseDown", function()
-        LimitToScreen()
-        frame:StartSizing("BOTTOMRIGHT")
+    grip:SetScript("OnMouseDown", function(_, button)
+        if button == "LeftButton" then StartDrag() end
     end)
-    grip:SetScript("OnMouseUp", function()
-        frame:StopMovingOrSizing()
-        if onResized then onResized(frame:GetSize()) end
-    end)
+    grip:SetScript("OnMouseUp", StopDrag)
+    -- The window can close mid-drag (Escape): the drag ends with it.
+    grip:SetScript("OnHide", StopDrag)
     return grip
 end
 
