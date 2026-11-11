@@ -570,6 +570,8 @@ function ns.CreateRefList(parent, onRemove, onDrop)
         end)
         row.open:SetHeight(20)
         row.open:SetPoint("RIGHT", right, 0)
+        -- A disabled button still explains itself on hover.
+        if row.open.SetMotionScriptsWhileDisabled then row.open:SetMotionScriptsWhileDisabled(true) end
         row.link = ns.CreateButton(row, L["Wowhead"], 78, function()
             local item = row.item
             -- Only items and quests have a Wowhead page.
@@ -591,6 +593,8 @@ function ns.CreateRefList(parent, onRemove, onDrop)
         row.link:SetShown(hasLink)
         -- Without the Wowhead button the text runs up to the open button.
         row.text:SetPoint("RIGHT", hasLink and row.link or row.open, "LEFT", -8, 0)
+        -- Rows are reused: only a quest that cannot be opened turns the button off, below.
+        row.open:SetEnabled(true)
         if item.kind == "item" then
             local label, plain = ns.ItemRefLabel(item.ref)
             local count = ns.BagCount(item.ref.id)
@@ -612,8 +616,12 @@ function ns.CreateRefList(parent, onRemove, onDrop)
             local label = ns.QuestLabel(item.ref)
             row.text:SetText("|cffffe066" .. L["Quest"] .. "|r  " .. label)
             row.open:SetText(L["Open"])
-            row.open.tooltipTitle = L["Open quest: %s"]:format(label)
-            row.open.tooltipText = L["Quest ID %d - %s"]:format(item.ref.id, (ns.QuestStatus(item.ref.id)))
+            -- Only a quest in the quest log has a page to open.
+            local status, logIndex = ns.QuestStatus(item.ref.id)
+            row.open:SetEnabled(logIndex ~= nil)
+            row.open.tooltipTitle = logIndex and L["Open quest: %s"]:format(label)
+                or L["This quest is not in your quest log"]
+            row.open.tooltipText = L["Quest ID %d - %s"]:format(item.ref.id, status)
         else
             local label = ns.PinLabel(item.ref)
             row.text:SetText("|cff66b8ff" .. L["Map"] .. "|r  " .. label)

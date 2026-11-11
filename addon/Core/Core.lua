@@ -848,6 +848,9 @@ events:RegisterEvent("ADDON_LOADED")
 events:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 -- Fires once after a batch of bag changes. Clients without it get the per-bag event instead.
 if not pcall(events.RegisterEvent, events, "BAG_UPDATE_DELAYED") then events:RegisterEvent("BAG_UPDATE") end
+-- A quest entering or leaving the quest log. Not every client has all of these.
+local QUEST_EVENTS = { QUEST_ACCEPTED = true, QUEST_REMOVED = true, QUEST_TURNED_IN = true }
+for event in pairs(QUEST_EVENTS) do pcall(events.RegisterEvent, events, event) end
 events:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" then
         if arg1 ~= addonName then return end
@@ -870,6 +873,9 @@ events:SetScript("OnEvent", function(self, event, arg1)
     elseif event == "BAG_UPDATE_DELAYED" or event == "BAG_UPDATE" then
         -- The open windows show bag counts, so they refresh as if a note had changed.
         bagCounts, bagOfItem, slotOfItem = nil, nil, nil
+        if ns.db then FireChanged() end
+    elseif QUEST_EVENTS[event] then
+        -- Reference lists show whether a quest can be opened, which follows the quest log.
         if ns.db then FireChanged() end
     end
 end)
