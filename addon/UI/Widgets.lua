@@ -145,14 +145,37 @@ function ns.CreateWindow(name, parent, width, height, title, portrait)
     return frame
 end
 
+-- Shrinks a window that is larger than the screen. Windows are clamped to the screen, which keeps every edge
+-- of one that fits inside it; one that does not fit would hang over an edge wherever it is put.
+function ns.FitToScreen(frame)
+    local maxWidth, maxHeight = UIParent:GetSize()
+    local width, height = frame:GetSize()
+    if width > maxWidth or height > maxHeight then
+        frame:SetSize(math.min(width, maxWidth), math.min(height, maxHeight))
+    end
+end
+
+local function SetResizeLimits(frame, minWidth, minHeight, maxWidth, maxHeight)
+    if frame.SetResizeBounds then
+        frame:SetResizeBounds(minWidth, minHeight, maxWidth, maxHeight)
+    else
+        if frame.SetMinResize then frame:SetMinResize(minWidth, minHeight) end
+        if frame.SetMaxResize then frame:SetMaxResize(maxWidth, maxHeight) end
+    end
+end
+
 -- Adds the standard resize grip to the bottom-right corner. onResized(width, height) fires when the drag ends.
+-- The window cannot be dragged larger than the room between its top-left corner and the screen's edges.
 function ns.MakeResizable(frame, minWidth, minHeight, onResized)
     frame:SetResizable(true)
-    if frame.SetResizeBounds then
-        frame:SetResizeBounds(minWidth, minHeight)
-    elseif frame.SetMinResize then
-        frame:SetMinResize(minWidth, minHeight)
+    local function LimitToScreen()
+        local maxWidth, maxHeight = UIParent:GetSize()
+        -- The top-left corner stays put while sizing: what is left is the screen to the right of and below it.
+        local left, top = frame:GetLeft(), frame:GetTop()
+        if left and top then maxWidth, maxHeight = maxWidth - left, top end
+        SetResizeLimits(frame, minWidth, minHeight, math.max(minWidth, maxWidth), math.max(minHeight, maxHeight))
     end
+    LimitToScreen()
     local grip = CreateFrame("Button", nil, frame)
     grip:SetSize(16, 16)
     grip:SetPoint("BOTTOMRIGHT", -3, 3)
@@ -160,7 +183,10 @@ function ns.MakeResizable(frame, minWidth, minHeight, onResized)
     grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
     grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
     grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-    grip:SetScript("OnMouseDown", function() frame:StartSizing("BOTTOMRIGHT") end)
+    grip:SetScript("OnMouseDown", function()
+        LimitToScreen()
+        frame:StartSizing("BOTTOMRIGHT")
+    end)
     grip:SetScript("OnMouseUp", function()
         frame:StopMovingOrSizing()
         if onResized then onResized(frame:GetSize()) end

@@ -433,7 +433,11 @@ local function CreateBrowser()
     browser.detail:SetPoint("TOPLEFT", panel, "TOPRIGHT", 12, 32)
     browser.detail:SetPoint("BOTTOMRIGHT", -14, 14)
 
-    browser:SetScript("OnShow", Refresh)
+    browser:SetScript("OnShow", function()
+        -- The saved size can be larger than the screen is now.
+        ns.FitToScreen(browser)
+        Refresh()
+    end)
     browser:SetScript("OnHide", function() browser.search:ClearFocus() end)
     ns.OnChanged(Refresh)
 end
