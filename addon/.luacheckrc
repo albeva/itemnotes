@@ -24,28 +24,29 @@ read_globals = {
     "date", "time", "geterrorhandler", "issecretvalue",
 
     -- Namespaces
-    "C_Item", "C_Map", "C_QuestLog", "C_SuperTrack", "C_Timer",
+    "C_Container", "C_Item", "C_Map", "C_QuestLog", "C_SuperTrack", "C_Timer",
     "ChatFrameUtil", "Enum", "Settings", "TooltipDataProcessor", "TooltipUtil", "UiMapPoint",
 
     -- Functions
     "ChatEdit_InsertLink", "ChatFrame_OpenChat", "ClearCursor", "CreateFrame",
-    "GameTooltip_Hide", "GetBindingKey", "GetBindingText", "GetCursorInfo",
-    "GetItemInfo", "GetItemInfoInstant", "GetMouseFoci", "GetMouseFocus",
+    "GameTooltip_Hide", "GetBindingKey", "GetBindingText", "GetContainerItemID", "GetContainerItemInfo",
+    "GetContainerNumSlots",
+    "GetCursorInfo", "GetItemInfo", "GetItemInfoInstant", "GetMouseFoci", "GetMouseFocus",
     "GetQuestLogIndexByID",
     "GetRealmName", "GetRealZoneText", "GetSubZoneText", "HideUIPanel",
     "InCombatLockdown", "InterfaceOptions_AddCategory", "InterfaceOptionsFrame_OpenToCategory",
-    "IsControlKeyDown", "IsMetaKeyDown", "IsModifiedClick", "IsShiftKeyDown",
-    "OpenWorldMap", "QuestLog_SetSelection", "QuestMapFrame_OpenToQuestDetails",
-    "SetPortraitToTexture", "ShowUIPanel", "StaticPopup_Show", "UnitName",
+    "IsBagOpen", "IsControlKeyDown", "IsMetaKeyDown", "IsModifiedClick", "IsShiftKeyDown",
+    "OpenAllBags", "OpenBag", "OpenWorldMap", "QuestLog_SetSelection", "QuestMapFrame_OpenToQuestDetails",
+    "SetItemSearch", "SetPortraitToTexture", "ShowUIPanel", "StaticPopup_Show", "UnitName",
 
     -- Frames and font objects
-    "ChatFontNormal", "GameFontHighlight", "GameFontHighlightSmall", "GameFontNormalLarge",
-    "GameTooltip", "ItemRefTooltip", "ObjectiveTrackerFrame", "QuestLogFrame",
+    "BagItemSearchBox", "ChatFontNormal", "GameFontHighlight", "GameFontHighlightSmall", "GameFontNormalLarge",
+    "GameTooltip", "ItemRefTooltip", "NumberFontNormal", "ObjectiveTrackerFrame", "QuestLogFrame",
     "QuestObjectiveTracker", "SettingsPanel", "ShoppingTooltip1", "ShoppingTooltip2",
     "StackSplitFrame", "UIParent", "WatchFrame", "WorldFrame", "WorldMapFrame",
 
     -- Constants
-    "ITEM_QUALITY_COLORS", "NO", "YES",
+    "ITEM_QUALITY_COLORS", "NO", "NUM_BAG_SLOTS", "NUM_TOTAL_EQUIPPED_BAG_SLOTS", "YES",
 
     -- Other addons
     "TomTom",

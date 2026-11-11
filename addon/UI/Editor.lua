@@ -42,6 +42,12 @@ local function RefreshRefs()
     editor.noRefs:SetShown(#items == 0)
 end
 
+-- The count on the item's icon and the Locate button follow what is in the bags.
+local function RefreshBagInfo()
+    ns.SetIconCount(editor.icon, editor.itemID)
+    editor.locate:UpdateForItem()
+end
+
 local function RefsChanged()
     editor.refsChanged = true
     RefreshRefs()
@@ -290,6 +296,8 @@ local function CreateEditor()
     wowhead:SetPoint("LEFT", editor.meta, "RIGHT", 10, 0)
     local chatLink = ns.CreateChatLinkButton(editor, function() return editor.itemID end)
     chatLink:SetPoint("LEFT", wowhead, "RIGHT", 4, 0)
+    editor.locate = ns.CreateLocateButton(editor, function() return editor.itemID end)
+    editor.locate:SetPoint("LEFT", chatLink, "RIGHT", 4, 0)
 
     -- Dropping an item anywhere on the window attaches it as a reference.
     editor:SetScript("OnReceiveDrag", TakeCursorItem)
@@ -391,9 +399,13 @@ local function CreateEditor()
         edit:ClearFocus()
     end)
 
-    -- Notes change behind the open editor (a delete from the Item Notes window): keep its references current.
+    -- Notes change behind the open editor (a delete from the Item Notes window), and so do the bags: keep its
+    -- references and bag counts current.
     ns.OnChanged(function()
-        if editor:IsShown() then RefreshRefs() end
+        if editor:IsShown() then
+            RefreshRefs()
+            RefreshBagInfo()
+        end
     end)
 end
 
@@ -453,6 +465,7 @@ function ns.OpenEditor(itemID, force)
     end
 
     RefreshRefs()
+    RefreshBagInfo()
     editor:Show()
     editor:Raise()
     editor.edit:SetFocus()

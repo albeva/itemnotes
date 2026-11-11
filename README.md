@@ -12,6 +12,7 @@ Notes are stored by item ID and shared across all characters on your account. Th
 - Location, time and character are recorded automatically
 - One window to search, sort and manage all notes
 - Copy a Wowhead link or post the item link in chat
+- See how many of an item are in your bags; **Locate** opens them and searches for it
 
 ## Usage
 

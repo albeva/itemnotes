@@ -200,6 +200,78 @@ function ns.ViewItem(itemID)
     if not shown then ns.Print(L["Could not show item %d."]:format(itemID)) end
 end
 
+-- ---------------------------------------------------------------------------
+-- Bags
+-- ---------------------------------------------------------------------------
+
+-- What the carried bags (backpack, equipped bags, reagent bag) hold: how many of each item, and the first bag
+-- holding it. Built on first use and thrown away whenever the bags change.
+local bagCounts, bagOfItem
+
+-- Returns false when this client has no bag API we know.
+local function ScanBags()
+    local numSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
+    local slotInfo = C_Container and C_Container.GetContainerItemInfo
+    if not numSlots or not (slotInfo or (GetContainerItemID and GetContainerItemInfo)) then return false end
+    local counts, bags = {}, {}
+    for bag = 0, NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4 do
+        for slot = 1, numSlots(bag) or 0 do
+            local itemID, count
+            if slotInfo then
+                local info = slotInfo(bag, slot)
+                if info then itemID, count = info.itemID, info.stackCount end
+            else
+                itemID = GetContainerItemID(bag, slot)
+                if itemID then count = select(2, GetContainerItemInfo(bag, slot)) end
+            end
+            if itemID then
+                counts[itemID] = (counts[itemID] or 0) + (count or 1)
+                bags[itemID] = bags[itemID] or bag
+            end
+        end
+    end
+    bagCounts, bagOfItem = counts, bags
+    return true
+end
+
+-- Returns how many of the item the carried bags hold, and the first bag holding it. Returns nil when this
+-- client has no bag API we know, so the answer is unknown.
+function ns.BagCount(itemID)
+    if not bagCounts and not ScanBags() then return nil end
+    return bagCounts[itemID] or 0, bagOfItem[itemID]
+end
+
+-- Opens the bags and filters them to the item, the same as typing its name into the bag search box: every
+-- other item is dimmed. The filter stays until the search box is cleared or the bags are closed.
+function ns.LocateItem(itemID)
+    local note = ns.GetNote(itemID)
+    local name = ns.ItemInfo(itemID) or (note and note.name)
+    if not name then
+        ns.Print(L["Item data is still loading. Try again in a moment."])
+        return
+    end
+    local count, bag = ns.BagCount(itemID)
+    if count == 0 then
+        ns.Print(L["%s is not in your bags."]:format(name))
+        return
+    end
+    local filtered = false
+    ns.Try(function()
+        if OpenAllBags then OpenAllBags() end
+        -- With separate bags, OpenAllBags leaves things alone when any bag is already open.
+        if bag and OpenBag and IsBagOpen and not IsBagOpen(bag) then OpenBag(bag) end
+        -- Filling the search box shows the player what is filtering their bags, and how to clear it.
+        if BagItemSearchBox and BagItemSearchBox.SetText then BagItemSearchBox:SetText(name) end
+        -- The box applies the search itself; this covers clients and bag frames without it.
+        local setSearch = (C_Container and C_Container.SetItemSearch) or SetItemSearch
+        if setSearch then
+            setSearch(name)
+            filtered = true
+        end
+    end)
+    if not filtered then ns.Print(L["Could not search your bags for %s."]:format(name)) end
+end
+
 function ns.PinLabel(pin)
     local name = pin.name or ns.MapName(pin.mapID) or L["Map %s"]:format(tostring(pin.mapID))
     return string.format("%s (%.1f, %.1f)", name, pin.x * 100, pin.y * 100)
@@ -634,6 +706,8 @@ end
 local events = CreateFrame("Frame")
 events:RegisterEvent("ADDON_LOADED")
 events:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+-- Fires once after a batch of bag changes. Clients without it get the per-bag event instead.
+if not pcall(events.RegisterEvent, events, "BAG_UPDATE_DELAYED") then events:RegisterEvent("BAG_UPDATE") end
 events:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" then
         if arg1 ~= addonName then return end
@@ -653,5 +727,9 @@ events:SetScript("OnEvent", function(self, event, arg1)
             ns.CacheItemInfo(arg1, note)
             if note.name then FireChanged() end
         end
+    elseif event == "BAG_UPDATE_DELAYED" or event == "BAG_UPDATE" then
+        -- The open windows show bag counts, so they refresh as if a note had changed.
+        bagCounts, bagOfItem = nil, nil
+        if ns.db then FireChanged() end
     end
 end)

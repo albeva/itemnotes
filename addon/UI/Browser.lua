@@ -75,6 +75,8 @@ local function RefreshDetail()
     end
 
     detail.icon.texture:SetTexture(note.icon or select(4, ns.ItemInfo(selectedID)) or ns.FALLBACK_ICON)
+    ns.SetIconCount(detail.icon, selectedID)
+    detail.locate:UpdateForItem()
     detail.name:SetText(ns.ItemName(selectedID, note.name))
     detail.name:SetTextColor(ns.QualityColor(note.quality))
     detail.meta:SetText(L["Item ID %d"]:format(selectedID))
@@ -125,6 +127,8 @@ local function CreateDetail(parent)
     wowhead:SetPoint("TOPLEFT", 12, -60)
     local chatLink = ns.CreateChatLinkButton(body, function() return selectedID end)
     chatLink:SetPoint("LEFT", wowhead, "RIGHT", 4, 0)
+    detail.locate = ns.CreateLocateButton(body, function() return selectedID end)
+    detail.locate:SetPoint("LEFT", chatLink, "RIGHT", 4, 0)
 
     local noteLabel = ns.Caption(body, L["Note"])
     noteLabel:SetPoint("TOPLEFT", 12, -92)
@@ -308,6 +312,7 @@ end
 local function UpdateRow(row, entry)
     local note = entry.note
     row.icon.texture:SetTexture(note.icon or select(4, ns.ItemInfo(entry.id)) or ns.FALLBACK_ICON)
+    ns.SetIconCount(row.icon, entry.id)
     row.name:SetText(entry.name)
     row.name:SetTextColor(ns.QualityColor(note.quality))
 

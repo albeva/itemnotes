@@ -189,7 +189,15 @@ function ns.CreateIcon(parent, size)
     frame.texture:SetPoint("TOPLEFT", 1, -1)
     frame.texture:SetPoint("BOTTOMRIGHT", -1, 1)
     frame.texture:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    frame.count = frame:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    frame.count:SetPoint("BOTTOMRIGHT", -2, 2)
     return frame
+end
+
+-- Shows how many of the item are in the bags in the icon's corner, as bag slots do. Nothing when there are none.
+function ns.SetIconCount(icon, itemID)
+    local count = itemID and ns.BagCount(itemID)
+    icon.count:SetText(count and count > 0 and count or "")
 end
 
 -- ---------------------------------------------------------------------------
@@ -434,6 +442,24 @@ function ns.CreateChatLinkButton(parent, getItemID)
     return button
 end
 
+-- A "Locate" button for an item. getItemID() returns the item it currently refers to. Call
+-- button:UpdateForItem() when that item or the bags change: the button hides while the bags hold none of it.
+function ns.CreateLocateButton(parent, getItemID)
+    local button = ns.CreateButton(parent, L["Locate"], 70, function()
+        local itemID = getItemID()
+        if itemID then ns.LocateItem(itemID) end
+    end)
+    button:SetHeight(20)
+    button.tooltipTitle = L["Find this item in your bags"]
+    button.tooltipText = L["Opens your bags and searches them for this item."]
+    function button:UpdateForItem()
+        local itemID = getItemID()
+        -- An unknown count (no bag API) keeps the button.
+        self:SetShown(itemID ~= nil and ns.BagCount(itemID) ~= 0)
+    end
+    return button
+end
+
 -- Each row has explicit buttons: open the reference in game and, for items and quests, copy its Wowhead link.
 -- Pass onRemove(item) to also give rows a remove button, and onDrop() to accept dragged items.
 function ns.CreateRefList(parent, onRemove, onDrop)
@@ -495,6 +521,8 @@ function ns.CreateRefList(parent, onRemove, onDrop)
         row.text:SetPoint("RIGHT", hasLink and row.link or row.open, "LEFT", -8, 0)
         if item.kind == "item" then
             local label, plain = ns.ItemRefLabel(item.ref)
+            local count = ns.BagCount(item.ref.id)
+            if count and count > 0 then label = label .. "  |cffffffffx" .. count .. "|r" end
             row.text:SetText("|cffc8a2ff" .. L["Item"] .. "|r  " .. label)
             row.open:SetText(L["View"])
             row.open.tooltipTitle = L["View item: %s"]:format(plain)
