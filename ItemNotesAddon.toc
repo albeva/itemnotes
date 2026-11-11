@@ -1,0 +1,15 @@
+## Interface: 16001
+## Title: Item Notes
+## Notes: Attach personal notes, quests and map locations to items. Notes show in item tooltips.
+## Author: Albert
+## Version: 1.0.0
+## IconTexture: Interface\Icons\INV_Misc_Note_01
+## SavedVariables: ItemNotesDB
+## AddonCompartmentFunc: ItemNotes_OnAddonCompartmentClick
+## Category-enUS: Inventory
+
+Core.lua
+Widgets.lua
+Editor.lua
+Browser.lua
+Options.lua
