@@ -3,6 +3,8 @@ local L = ns.L
 
 ns.title = L["Item Notes"]
 ns.FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+-- The addon's own icon (Media\icon.tga). Built from the folder name so it survives a renamed folder.
+ns.ICON = "Interface\\AddOns\\" .. addonName .. "\\Media\\icon"
 
 BINDING_HEADER_ITEMNOTES = ns.title
 BINDING_NAME_ITEMNOTES_EDIT = L["Add / edit note for hovered item"]

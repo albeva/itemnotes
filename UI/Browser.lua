@@ -349,7 +349,7 @@ local function RestoreLayout()
 end
 
 local function CreateBrowser()
-    browser = ns.CreateWindow("ItemNotesBrowser", UIParent, 840, 540, ns.title, "Interface\\Icons\\INV_Misc_Note_01")
+    browser = ns.CreateWindow("ItemNotesBrowser", UIParent, 840, 540, ns.title, ns.ICON)
     browser:SetPoint("CENTER")
     table.insert(UISpecialFrames, "ItemNotesBrowser")
 

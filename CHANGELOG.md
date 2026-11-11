@@ -21,6 +21,7 @@
 - Searching refreshes once typing pauses instead of on every keystroke.
 - The notes window remembers its position as well as its size.
 - All text goes through a locale table, ready for translation.
+- The addon has its own icon, shown in the addon list, the addon compartment and the notes window.
 
 ## 1.0.0
 

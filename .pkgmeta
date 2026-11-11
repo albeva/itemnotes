@@ -4,5 +4,7 @@ ignore:
   - README.md
   - CHANGELOG.md
   - screenshots
+  - Media/icon.svg
+  - Media/icon.png
   - .gitignore
   - .luacheckrc

@@ -3,7 +3,7 @@
 ## Notes: Attach personal notes, quests and map locations to items. Notes show in item tooltips.
 ## Author: Albert
 ## Version: 1.0.0
-## IconTexture: Interface\Icons\INV_Misc_Note_01
+## IconTexture: Interface\AddOns\ItemNotesAddon\Media\icon
 ## SavedVariables: ItemNotesDB
 ## OptionalDeps: TomTom
 ## AddonCompartmentFunc: ItemNotes_OnAddonCompartmentClick
