@@ -55,10 +55,10 @@ Set the keybind under **Options > Keybindings > AddOns > Item Notes**. There is 
 
 ## Install
 
-The addon itself lives in the `addon` folder of this repository. Copy that folder into your AddOns folder and name it `ItemNotesAddon`:
+The addon itself lives in the `addon` folder of this repository. Copy that folder into your AddOns folder and name it `ItemNotesForever`:
 
 ```
-World of Warcraft/_forever_/Interface/AddOns/ItemNotesAddon/ItemNotesAddon.toc
+World of Warcraft/_forever_/Interface/AddOns/ItemNotesForever/ItemNotesForever.toc
 ```
 
 To keep it updated with `git pull`, clone the repository anywhere and link the folder instead of copying it.
@@ -67,14 +67,14 @@ Windows (Command Prompt):
 
 ```
 git clone https://github.com/albeva/itemnotes
-mklink /J "C:\Path\To\World of Warcraft\_forever_\Interface\AddOns\ItemNotesAddon" "itemnotes\addon"
+mklink /J "C:\Path\To\World of Warcraft\_forever_\Interface\AddOns\ItemNotesForever" "itemnotes\addon"
 ```
 
 macOS:
 
 ```
 git clone https://github.com/albeva/itemnotes
-ln -s "$PWD/itemnotes/addon" "/Applications/World of Warcraft/_forever_/Interface/AddOns/ItemNotesAddon"
+ln -s "$PWD/itemnotes/addon" "/Applications/World of Warcraft/_forever_/Interface/AddOns/ItemNotesForever"
 ```
 
 Restart the game.
@@ -83,7 +83,8 @@ Restart the game.
 
 | Path | Contents |
 |---|---|
-| `addon/` | Everything the game loads, plus lint and packaging config |
+| `addon/` | Everything the game loads, plus lint config |
+| `.pkgmeta` | CurseForge packaging config |
 | `art/` | Icon source (SVG) and a 512px render |
 | `screenshots/` | Images for this page |
 

@@ -1,8 +1,8 @@
-package-as: ItemNotesAddon
+package-as: ItemNotesForever
 
 # Addon sources live in addon/; lift them to the top of the packaged folder.
 move-folders:
-  ItemNotesAddon/addon: ItemNotesAddon
+  ItemNotesForever/addon: ItemNotesForever
 
 # Dotfiles (.luacheckrc, .gitignore, ...) are ignored automatically.
 ignore:
