@@ -22,6 +22,7 @@
 - The notes window remembers its position as well as its size.
 - All text goes through a locale table, ready for translation.
 - The addon has its own icon, shown in the addon list, the addon compartment and the notes window.
+- Repository layout: the addon's files moved into `addon/`. Install by copying or linking that folder as `ItemNotesAddon`.
 
 ## 1.0.0
 
