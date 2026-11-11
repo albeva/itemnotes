@@ -147,14 +147,27 @@ function ns.WowheadURL(kind, id)
     return "https://www.wowhead.com/forever/" .. kind .. "=" .. id
 end
 
+-- Returns the item's name in its quality colour, and the plain name.
+local function ColoredName(itemID, name, quality)
+    local plain = ns.ItemName(itemID, name)
+    local color = quality and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality]
+    return ((color and color.hex) or "|cffffffff") .. plain .. "|r", plain
+end
+
 -- Returns a quality-coloured name and the plain name for an item reference.
 function ns.ItemRefLabel(ref)
     local name, _, quality = ns.ItemInfo(ref.id)
     if name then ref.name = name end
     if quality then ref.quality = quality end
-    local plain = ns.ItemName(ref.id, ref.name)
-    local color = ref.quality and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[ref.quality]
-    return ((color and color.hex) or "|cffffffff") .. plain .. "|r", plain
+    return ColoredName(ref.id, ref.name, ref.quality)
+end
+
+-- Returns a quality-coloured name and the plain name for a reference to another item's note.
+-- The name comes from the referenced note, which keeps it cached.
+function ns.NoteRefLabel(ref)
+    local note = ns.GetNote(ref.id)
+    local name, _, quality = ns.ItemInfo(ref.id)
+    return ColoredName(ref.id, name or (note and note.name), quality or (note and note.quality))
 end
 
 -- Inserts a link into the chat box that is currently open. Returns false when there is none.
@@ -210,27 +223,6 @@ end
 
 function ns.QuestLabel(quest)
     return quest.title or L["Quest #%d"]:format(quest.id)
-end
-
-function ns.QuestLogQuests()
-    local quests = {}
-    local count = (C_QuestLog and C_QuestLog.GetNumQuestLogEntries and C_QuestLog.GetNumQuestLogEntries())
-        or (GetNumQuestLogEntries and GetNumQuestLogEntries()) or 0
-    for index = 1, count do
-        local title, isHeader, questID
-        if C_QuestLog and C_QuestLog.GetInfo then
-            local info = C_QuestLog.GetInfo(index)
-            if info then title, isHeader, questID = info.title, info.isHeader, info.questID end
-        elseif GetQuestLogTitle then
-            local t, _, _, header, _, _, _, id = GetQuestLogTitle(index)
-            title, isHeader, questID = t, header, id
-        end
-        if not isHeader and PublicNumber(questID) and questID > 0 and PublicString(title) then
-            quests[#quests + 1] = { id = questID, title = title }
-        end
-    end
-    table.sort(quests, function(a, b) return a.title < b.title end)
-    return quests
 end
 
 -- Returns a description of the quest's state and, when it is in the quest log, its log index.
@@ -367,6 +359,53 @@ local function ValidItemRef(item)
     return IsID(item.id)
 end
 
+-- A reference to another item's note: just that item's ID.
+local function ValidNoteRef(ref)
+    return IsID(ref.id)
+end
+
+local function HasNoteRef(refs, itemID)
+    for _, ref in ipairs(refs) do
+        if ref.id == itemID then return true end
+    end
+    return false
+end
+
+local function RemoveNoteRef(refs, itemID)
+    for index = #refs, 1, -1 do
+        if refs[index].id == itemID then table.remove(refs, index) end
+    end
+end
+
+-- Drops the note's references to itself and to notes that do not exist, and any repeated reference.
+local function CleanNoteRefs(db, itemID, note)
+    local refs, seen = note.notes, {}
+    for index = #refs, 1, -1 do
+        local target = refs[index].id
+        if target == itemID or seen[target] or not db.notes[target] then
+            table.remove(refs, index)
+        else
+            seen[target] = true
+        end
+    end
+end
+
+-- References between notes go both ways. Makes every note that this one lists point back at it, and with
+-- exclusive set, removes the reference to it from every note it does not list.
+local function MirrorNoteRefs(db, itemID, note, exclusive)
+    local linked = {}
+    for _, ref in ipairs(note.notes) do linked[ref.id] = true end
+    for otherID, other in pairs(db.notes) do
+        if otherID ~= itemID then
+            if linked[otherID] then
+                if not HasNoteRef(other.notes, itemID) then other.notes[#other.notes + 1] = { id = itemID } end
+            elseif exclusive then
+                RemoveNoteRef(other.notes, itemID)
+            end
+        end
+    end
+end
+
 -- Makes sure every stored note has the shape the UI expects, so a damaged or hand-edited saved-variables file
 -- cannot cause errors later. Entries that are not notes at all are moved to db.invalid rather than deleted.
 local function SanitizeNotes(db)
@@ -388,6 +427,7 @@ local function SanitizeNotes(db)
             note.quests = CleanList(note.quests, ValidQuestRef)
             note.pins = CleanList(note.pins, ValidPinRef)
             note.items = CleanList(note.items, ValidItemRef)
+            note.notes = CleanList(note.notes, ValidNoteRef)
         else
             invalid = invalid or {}
             invalid[#invalid + 1] = itemID
@@ -399,6 +439,14 @@ local function SanitizeNotes(db)
             db.invalid[tostring(key)] = db.notes[key]
             db.notes[key] = nil
         end
+    end
+    -- Only once every note is known to be valid can references between them be checked.
+    for itemID, note in pairs(db.notes) do
+        CleanNoteRefs(db, itemID, note)
+    end
+    -- A reference stored on one side only (older data, or a hand-edited file) gains its other side.
+    for itemID, note in pairs(db.notes) do
+        MirrorNoteRefs(db, itemID, note, false)
     end
 end
 
@@ -415,7 +463,9 @@ function ns.CacheItemInfo(itemID, note)
 end
 
 -- Creates or updates a note. Location, character and creation time are recorded once, when the note is created.
-function ns.SaveNote(itemID, text, quests, pins, items)
+-- notes lists references to other items' notes, as { id = itemID } entries. Those go both ways: each note
+-- listed gains a reference back to this one, and a note no longer listed loses its reference to this one.
+function ns.SaveNote(itemID, text, quests, pins, items, notes)
     local note = ns.db.notes[itemID]
     local now = time()
     if not note then
@@ -431,16 +481,22 @@ function ns.SaveNote(itemID, text, quests, pins, items)
     note.quests = quests or note.quests or {}
     note.pins = pins or note.pins or {}
     note.items = items or note.items or {}
+    note.notes = notes or note.notes or {}
+    CleanNoteRefs(ns.db, itemID, note)
+    MirrorNoteRefs(ns.db, itemID, note, true)
     ns.CacheItemInfo(itemID, note)
     FireChanged()
     return note
 end
 
+-- Deletes a note, and with it every reference other notes hold to it.
 function ns.DeleteNote(itemID)
-    if ns.db.notes[itemID] then
-        ns.db.notes[itemID] = nil
-        FireChanged()
+    if not ns.db.notes[itemID] then return end
+    ns.db.notes[itemID] = nil
+    for _, note in pairs(ns.db.notes) do
+        RemoveNoteRef(note.notes, itemID)
     end
+    FireChanged()
 end
 
 StaticPopupDialogs["ITEMNOTES_DELETE"] = {

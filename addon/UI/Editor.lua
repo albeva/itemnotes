@@ -1,7 +1,7 @@
 local _, ns = ...
 local L = ns.L
 
-local editor, picker
+local editor
 
 -- Unsaved edits from an editor that was closed without Save or Cancel (Escape, the close button).
 -- They come back the next time the same item is opened, so a stray Escape never loses typing.
@@ -29,11 +29,15 @@ local function IsDirty()
 end
 
 -- ---------------------------------------------------------------------------
--- References (quests and map pins) being edited
+-- References (items, other notes, quests and map pins) being edited
 -- ---------------------------------------------------------------------------
 
 local function RefreshRefs()
-    local items = ns.RefItems(editor.quests, editor.pins, editor.items)
+    -- A referenced note can be deleted while the editor is open, or while a draft waits: drop it here too.
+    for index = #editor.notes, 1, -1 do
+        if not ns.GetNote(editor.notes[index].id) then table.remove(editor.notes, index) end
+    end
+    local items = ns.RefItems(editor.quests, editor.pins, editor.items, editor.notes)
     editor.refs:SetItems(items)
     editor.noRefs:SetShown(#items == 0)
 end
@@ -44,8 +48,25 @@ local function RefsChanged()
 end
 
 local function RemoveRef(item)
-    local lists = { quest = editor.quests, pin = editor.pins, item = editor.items }
+    local lists = { quest = editor.quests, pin = editor.pins, item = editor.items, note = editor.notes }
     table.remove(lists[item.kind], item.index)
+    RefsChanged()
+end
+
+-- Returns the position of the reference to itemID's note in a list of note references, or nil.
+local function FindNoteRef(list, itemID)
+    for index, ref in ipairs(list) do
+        if ref.id == itemID then return index end
+    end
+    return nil
+end
+
+-- Attaches another item's note. Only an existing note can be referenced, and never the one being edited.
+-- Saving makes the reference two-way: the other note then lists this one too.
+local function AddNote(itemID)
+    if itemID == editor.itemID or not ns.GetNote(itemID) then return end
+    if FindNoteRef(editor.notes, itemID) then return end
+    editor.notes[#editor.notes + 1] = { id = itemID }
     RefsChanged()
 end
 
@@ -68,11 +89,11 @@ local function TakeCursorItem()
     end
 end
 
-local function AddQuest(questID, title)
+local function AddQuest(questID)
     for _, quest in ipairs(editor.quests) do
         if quest.id == questID then return end
     end
-    editor.quests[#editor.quests + 1] = { id = questID, title = title or ns.QuestTitle(questID) }
+    editor.quests[#editor.quests + 1] = { id = questID, title = ns.QuestTitle(questID) }
     RefsChanged()
 end
 
@@ -173,7 +194,13 @@ local function OnGlobalMouse(_, event, button)
         if ok and questID then
             pendingQuest, pendingWatched = questID, IsWatched(questID)
             AddQuest(questID)
-        elseif not editor:IsMouseOver() and not (picker and picker:IsShown() and picker:IsMouseOver()) then
+        elseif not editor:IsMouseOver() then
+            -- A note in the Item Notes window is attached as a note, not as its bare item.
+            local noteID = ns.HoveredNote()
+            if noteID then
+                AddNote(noteID)
+                return
+            end
             -- Not a quest: attach whatever item the mouse is hovering (bag slot, quest reward, list row...).
             local itemID = ns.HoveredItem()
             if itemID then
@@ -196,69 +223,6 @@ local function OnGlobalMouse(_, event, button)
 end
 
 -- ---------------------------------------------------------------------------
--- Quest picker
--- ---------------------------------------------------------------------------
-
-local function ShowQuestPicker()
-    if not picker then
-        picker = ns.CreateWindow("ItemNotesQuestPicker", editor, 300, 380, L["Attach Quest"])
-        picker:SetPoint("TOPLEFT", editor, "TOPRIGHT", 6, 0)
-        picker:SetFrameStrata("DIALOG")
-        picker:SetMovable(false)
-        picker:RegisterForDrag()
-
-        local label = ns.Caption(picker, L["From your quest log"])
-        label:SetPoint("TOPLEFT", 14, -42)
-
-        local panel
-        panel, picker.list = ns.CreatePanelList(picker, 24, function(row)
-            ns.AddHighlight(row)
-            row.text = ns.Text(row, "normal")
-            row.text:SetPoint("LEFT", 6, 0)
-            row.text:SetPoint("RIGHT", -4, 0)
-            row.text:SetWordWrap(false)
-            row:SetScript("OnClick", function(self)
-                if self.item then AddQuest(self.item.id, self.item.title) end
-                picker:Hide()
-            end)
-        end, function(row, quest)
-            row.text:SetText(quest.title)
-        end)
-        panel:SetPoint("TOPLEFT", 14, -58)
-        panel:SetPoint("BOTTOMRIGHT", -14, 72)
-
-        picker.empty = ns.Text(panel, "normal", "muted")
-        picker.empty:SetPoint("TOP", 0, -24)
-        picker.empty:SetText(L["Your quest log is empty."])
-
-        local idLabel = ns.Caption(picker, L["Or by quest ID"])
-        idLabel:SetPoint("BOTTOMLEFT", 14, 48)
-
-        local idBox = ns.CreateInput(picker, 150, L["Quest ID"])
-        idBox:SetPoint("BOTTOMLEFT", 20, 16)
-        idBox:SetNumeric(true)
-        idBox:SetMaxLetters(9)
-        picker.idBox = idBox
-
-        local function AddByID()
-            local questID = tonumber(idBox:GetText())
-            if ns.IsID(questID) then
-                AddQuest(questID)
-                picker:Hide()
-            end
-        end
-        idBox:SetScript("OnEnterPressed", AddByID)
-        local add = ns.CreateButton(picker, L["Add"], 80, AddByID)
-        add:SetPoint("LEFT", idBox, "RIGHT", 8, 0)
-    end
-    local quests = ns.QuestLogQuests()
-    picker.list:SetItems(quests)
-    picker.empty:SetShown(#quests == 0)
-    picker.idBox:SetText("")
-    picker:Show()
-end
-
--- ---------------------------------------------------------------------------
 -- Editor window
 -- ---------------------------------------------------------------------------
 
@@ -271,11 +235,21 @@ end
 local function Save()
     local itemID = editor.itemID
     local text = ns.Trim(editor.edit:GetText())
-    if text == "" and #editor.quests == 0 and #editor.pins == 0 and #editor.items == 0 then
+    if text == "" and #editor.quests == 0 and #editor.pins == 0 and #editor.items == 0 and #editor.notes == 0 then
         -- Nothing left to keep: an emptied note is removed.
         ns.DeleteNote(itemID)
     else
-        ns.SaveNote(itemID, text, editor.quests, editor.pins, editor.items)
+        ns.SaveNote(itemID, text, editor.quests, editor.pins, editor.items, editor.notes)
+        if draft then
+            -- Unsaved edits wait for another item. References go both ways, so a link to that item made or
+            -- removed here must show in them too, or saving them later would undo it.
+            local index = FindNoteRef(draft.notes, itemID)
+            if FindNoteRef(editor.notes, draft.itemID) then
+                if not index then draft.notes[#draft.notes + 1] = { id = itemID } end
+            elseif index then
+                table.remove(draft.notes, index)
+            end
+        end
     end
     Close()
 end
@@ -340,7 +314,7 @@ local function CreateEditor()
 
     local refHint = ns.Text(editor, "small", "muted")
     refHint:SetPoint("TOPRIGHT", -14, -122)
-    refHint:SetText(L["Shift-click a quest or item to attach it"])
+    refHint:SetText(L["Shift-click a quest, item or note to attach it"])
 
     local refPanel
     refPanel, editor.refs = ns.CreateRefList(editor, RemoveRef, TakeCursorItem)
@@ -353,19 +327,15 @@ local function CreateEditor()
     editor.noRefs = ns.Text(refPanel, "small", "muted")
     editor.noRefs:SetPoint("CENTER")
     editor.noRefs:SetJustifyH("CENTER")
-    editor.noRefs:SetText(L["No items, quests or map locations attached.\nShift-click a quest or an item anywhere in the game,\nor drag an item onto this window."])
+    editor.noRefs:SetText(L["No items, notes, quests or map locations attached.\nShift-click a quest or an item anywhere in the game, or a note\nin the Item Notes window. Or drag an item onto this window."])
 
-    local addQuest = ns.CreateButton(editor, L["Add Quest"], 110, ShowQuestPicker)
-    addQuest:SetPoint("TOPLEFT", 14, -238)
-    addQuest.tooltipTitle = L["Pick a quest from your log or enter a quest ID."]
-    addQuest.tooltipText = L["Faster: shift-click a quest in the tracker or quest log while this window is open."]
-
+    -- Quests, items and notes are attached by shift-click. Only map locations need buttons.
     local addHere = ns.CreateButton(editor, L["Add My Location"], 140, function()
         local loc = ns.CaptureLocation()
         local pin = loc.mapID and loc.x and { mapID = loc.mapID, x = loc.x, y = loc.y, name = ns.MapName(loc.mapID) }
         AddPin(pin, L["Your position is not available here (instances have no map coordinates)."])
     end)
-    addHere:SetPoint("LEFT", addQuest, "RIGHT", 6, 0)
+    addHere:SetPoint("TOPLEFT", 14, -238)
     addHere.tooltipTitle = L["Attach where you are standing right now."]
 
     local addWaypoint = ns.CreateButton(editor, L["Add Map Pin"], 120, function()
@@ -413,12 +383,17 @@ local function CreateEditor()
                 quests = editor.quests,
                 pins = editor.pins,
                 items = editor.items,
+                notes = editor.notes,
             }
             ns.Print(L["Unsaved changes kept. Open the note again to continue editing."])
         end
         closing = false
         edit:ClearFocus()
-        if picker then picker:Hide() end
+    end)
+
+    -- Notes change behind the open editor (a delete from the Item Notes window): keep its references current.
+    ns.OnChanged(function()
+        if editor:IsShown() then RefreshRefs() end
     end)
 end
 
@@ -457,6 +432,7 @@ function ns.OpenEditor(itemID, force)
     editor.quests = CopyList(note and note.quests)
     editor.pins = CopyList(note and note.pins)
     editor.items = CopyList(note and note.items)
+    editor.notes = CopyList(note and note.notes)
     editor.refsChanged = false
     editor.originalText = SingleLine(note and note.text)
     editor.title:SetText(note and L["Edit Item Note"] or L["New Item Note"])
@@ -470,13 +446,12 @@ function ns.OpenEditor(itemID, force)
         or L["Your location and the time are recorded when you save."])
 
     if draft and draft.itemID == itemID then
-        editor.quests, editor.pins, editor.items = draft.quests, draft.pins, draft.items
+        editor.quests, editor.pins, editor.items, editor.notes = draft.quests, draft.pins, draft.items, draft.notes
         editor.refsChanged = true
         editor.edit:SetText(draft.text)
         draft = nil
     end
 
-    if picker then picker:Hide() end
     RefreshRefs()
     editor:Show()
     editor:Raise()

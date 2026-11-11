@@ -7,7 +7,11 @@ local sortMode = "recent"
 local SORT_LABELS = { recent = L["Sort: Recent"], name = L["Sort: Name"], zone = L["Sort: Zone"] }
 local SORT_NEXT = { recent = "name", name = "zone", zone = "recent" }
 local MIN_WIDTH, MIN_HEIGHT = 760, 440
+local ROW_HEIGHT = 46
 local SEARCH_DELAY = 0.15
+
+-- The list row under the mouse, if any.
+local hoveredRow
 
 -- Items whose data was already requested from the server this session, so a refresh does not ask again.
 local requested = {}
@@ -19,6 +23,10 @@ local function Matches(entry, filter)
     for _, quest in ipairs(note.quests) do haystack[#haystack + 1] = quest.title or "" end
     for _, pin in ipairs(note.pins) do haystack[#haystack + 1] = ns.PinLabel(pin) end
     for _, item in ipairs(note.items) do haystack[#haystack + 1] = item.name or "" end
+    for _, ref in ipairs(note.notes) do
+        local target = ns.GetNote(ref.id)
+        haystack[#haystack + 1] = target and target.name or ""
+    end
     return table.concat(haystack, "\n"):lower():find(filter, 1, true) ~= nil
 end
 
@@ -80,7 +88,7 @@ local function RefreshDetail()
         detail.noteScroll:ScrollTo(0)
     end
 
-    local refs = ns.RefItems(note.quests, note.pins, note.items)
+    local refs = ns.RefItems(note.quests, note.pins, note.items, note.notes)
     detail.refs:SetItems(refs)
     detail.noRefs:SetShown(#refs == 0)
     detail.recorded:SetText(ns.RecordedText(note, true))
@@ -153,7 +161,7 @@ local function CreateDetail(parent)
 
     detail.noRefs = ns.Text(refPanel, "small", "muted")
     detail.noRefs:SetPoint("CENTER")
-    detail.noRefs:SetText(L["No items, quests or map locations attached."])
+    detail.noRefs:SetText(L["No items, notes, quests or map locations attached."])
 
     detail.recorded = ns.Text(body, "small", "muted")
     detail.recorded:SetPoint("BOTTOMLEFT", 12, 44)
@@ -185,6 +193,7 @@ local function Refresh()
     if not browser or not browser.detail or not browser:IsShown() then return end
     if selectedID and not ns.GetNote(selectedID) then selectedID = nil end
     local entries, total = BuildEntries()
+    browser.entries = entries
     browser.list:SetItems(entries)
     if total == 0 then
         browser.empty:SetText(L["No notes yet.\n\nHover over an item and press your\nItem Notes keybind, or drag an item here."])
@@ -268,7 +277,7 @@ local function InitRow(row)
         local entry = self.item
         if not entry or TakeCursorItem() then return end
         if IsModifiedClick and IsModifiedClick("CHATLINK") then
-            -- While the editor is open, a shift-click attaches the item to the note being edited instead.
+            -- While the editor is open, a shift-click attaches this note to the note being edited instead.
             if not ns.IsEditorOpen() then
                 local _, link = ns.ItemInfo(entry.id)
                 if link then ns.InsertChatLink(link) end
@@ -283,9 +292,13 @@ local function InitRow(row)
     end)
     row:SetScript("OnReceiveDrag", TakeCursorItem)
     row:SetScript("OnEnter", function(self)
+        hoveredRow = self
         if self.item then ns.ShowItemTooltip(self, self.item.id, "ANCHOR_LEFT") end
     end)
-    row:SetScript("OnLeave", GameTooltip_Hide)
+    row:SetScript("OnLeave", function(self)
+        if hoveredRow == self then hoveredRow = nil end
+        GameTooltip_Hide()
+    end)
 end
 
 local function Plural(count, one, many)
@@ -299,10 +312,11 @@ local function UpdateRow(row, entry)
     row.name:SetTextColor(ns.QualityColor(note.quality))
 
     local text = (note.text or ""):gsub("%s+", " ")
-    local items, quests, pins = #note.items, #note.quests, #note.pins
-    if items + quests + pins > 0 then
+    local items, notes, quests, pins = #note.items, #note.notes, #note.quests, #note.pins
+    if items + notes + quests + pins > 0 then
         local refs = {}
         if items > 0 then refs[#refs + 1] = Plural(items, L["%d item"], L["%d items"]) end
+        if notes > 0 then refs[#refs + 1] = Plural(notes, L["%d note"], L["%d notes"]) end
         if quests > 0 then refs[#refs + 1] = Plural(quests, L["%d quest"], L["%d quests"]) end
         if pins > 0 then refs[#refs + 1] = Plural(pins, L["%d location"], L["%d locations"]) end
         text = "|cff66b8ff" .. table.concat(refs, ", ") .. "|r  " .. text
@@ -373,7 +387,7 @@ local function CreateBrowser()
     end)
 
     local panel
-    panel, browser.list = ns.CreatePanelList(browser, 46, InitRow, UpdateRow)
+    panel, browser.list = ns.CreatePanelList(browser, ROW_HEIGHT, InitRow, UpdateRow)
     panel:SetPoint("TOPLEFT", 14, -62)
     panel:SetPoint("BOTTOMLEFT", 14, 48)
     panel:SetWidth(368)
@@ -426,4 +440,48 @@ function ns.ToggleBrowser()
         browser:Hide()
     end
     browser:SetShown(not browser:IsShown())
+end
+
+-- The item ID of the note whose list row is under the mouse, if any.
+function ns.HoveredNote()
+    local row = hoveredRow
+    if not (row and row.item and row:IsVisible() and row:IsMouseOver()) then return nil end
+    return row.item.id
+end
+
+-- Scrolls the list just far enough to bring the selected note's row into view. Does nothing when the search
+-- box filters that note out.
+local function ScrollToSelected()
+    local list = browser.list
+    for index, entry in ipairs(browser.entries or {}) do
+        if entry.id == selectedID then
+            local top = (index - 1) * ROW_HEIGHT
+            local offset, height = list:GetVerticalScroll() or 0, list:GetHeight() or 0
+            if top < offset then
+                list:SetVerticalScroll(top)
+            elseif top + ROW_HEIGHT > offset + height then
+                list:SetVerticalScroll(math.max(0, top + ROW_HEIGHT - height))
+            end
+            return
+        end
+    end
+end
+
+-- Opens the Item Notes window with the note for itemID selected.
+function ns.ShowNote(itemID)
+    if not ns.db or not ns.GetNote(itemID) then return end
+    if not browser then
+        CreateBrowser()
+        browser:Hide()
+    end
+    selectedID = itemID
+    if browser:IsShown() then
+        browser.list:Redraw()
+        RefreshDetail()
+    else
+        -- OnShow refreshes the list and the detail pane.
+        browser:Show()
+    end
+    browser:Raise()
+    ScrollToSelected()
 end

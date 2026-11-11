@@ -31,7 +31,7 @@ read_globals = {
     "ChatEdit_InsertLink", "ChatFrame_OpenChat", "ClearCursor", "CreateFrame",
     "GameTooltip_Hide", "GetBindingKey", "GetBindingText", "GetCursorInfo",
     "GetItemInfo", "GetItemInfoInstant", "GetMouseFoci", "GetMouseFocus",
-    "GetNumQuestLogEntries", "GetQuestLogIndexByID", "GetQuestLogTitle",
+    "GetQuestLogIndexByID",
     "GetRealmName", "GetRealZoneText", "GetSubZoneText", "HideUIPanel",
     "InCombatLockdown", "InterfaceOptions_AddCategory", "InterfaceOptionsFrame_OpenToCategory",
     "IsControlKeyDown", "IsMetaKeyDown", "IsModifiedClick", "IsShiftKeyDown",

@@ -337,13 +337,16 @@ function ns.CreatePanelList(parent, rowHeight, initRow, updateRow)
 end
 
 -- ---------------------------------------------------------------------------
--- Reference list (items, quests and map pins attached to a note)
+-- Reference list (items, other notes, quests and map pins attached to a note)
 -- ---------------------------------------------------------------------------
 
-function ns.RefItems(quests, pins, items)
+function ns.RefItems(quests, pins, items, notes)
     local refs = {}
     for index, item in ipairs(items or {}) do
         refs[#refs + 1] = { kind = "item", index = index, ref = item }
+    end
+    for index, note in ipairs(notes or {}) do
+        refs[#refs + 1] = { kind = "note", index = index, ref = note }
     end
     for index, quest in ipairs(quests or {}) do
         refs[#refs + 1] = { kind = "quest", index = index, ref = quest }
@@ -359,6 +362,8 @@ function ns.OpenRef(item)
         ns.OpenQuest(item.ref)
     elseif item.kind == "item" then
         ns.ViewItem(item.ref.id)
+    elseif item.kind == "note" then
+        ns.ShowNote(item.ref.id)
     else
         ns.OpenPin(item.ref)
     end
@@ -429,7 +434,7 @@ function ns.CreateChatLinkButton(parent, getItemID)
     return button
 end
 
--- Each row has explicit buttons: open the reference in game, and copy its Wowhead link.
+-- Each row has explicit buttons: open the reference in game and, for items and quests, copy its Wowhead link.
 -- Pass onRemove(item) to also give rows a remove button, and onDrop() to accept dragged items.
 function ns.CreateRefList(parent, onRemove, onDrop)
     return ns.CreatePanelList(parent, 24, function(row)
@@ -441,7 +446,8 @@ function ns.CreateRefList(parent, onRemove, onDrop)
         row:SetScript("OnEnter", function(self)
             local item = self.item
             if not item then return end
-            if item.kind == "item" then
+            if item.kind == "item" or item.kind == "note" then
+                -- For a note reference the item tooltip also carries the referenced note's text.
                 ns.ShowItemTooltip(self, item.ref.id, "ANCHOR_LEFT")
             else
                 -- Full text, in case the row is too narrow to show it all.
@@ -468,7 +474,8 @@ function ns.CreateRefList(parent, onRemove, onDrop)
         row.open:SetPoint("RIGHT", right, 0)
         row.link = ns.CreateButton(row, L["Wowhead"], 78, function()
             local item = row.item
-            if not item or item.kind == "pin" then return end
+            -- Only items and quests have a Wowhead page.
+            if not item or (item.kind ~= "item" and item.kind ~= "quest") then return end
             ns.ShowCopy(ns.WowheadURL(item.kind, item.ref.id), L["Wowhead link"])
         end)
         row.link:SetHeight(20)
@@ -482,13 +489,25 @@ function ns.CreateRefList(parent, onRemove, onDrop)
             if self.item then ns.OpenRef(self.item) end
         end)
     end, function(row, item)
-        row.link:SetShown(item.kind ~= "pin")
+        local hasLink = item.kind == "item" or item.kind == "quest"
+        row.link:SetShown(hasLink)
+        -- Without the Wowhead button the text runs up to the open button.
+        row.text:SetPoint("RIGHT", hasLink and row.link or row.open, "LEFT", -8, 0)
         if item.kind == "item" then
             local label, plain = ns.ItemRefLabel(item.ref)
             row.text:SetText("|cffc8a2ff" .. L["Item"] .. "|r  " .. label)
             row.open:SetText(L["View"])
             row.open.tooltipTitle = L["View item: %s"]:format(plain)
             row.open.tooltipText = L["Pins the item tooltip on screen."]
+        elseif item.kind == "note" then
+            local label, plain = ns.NoteRefLabel(item.ref)
+            local note = ns.GetNote(item.ref.id)
+            local excerpt = note and ns.Trim((note.text or ""):gsub("%s+", " ")) or ""
+            if excerpt ~= "" then label = label .. "  |cff9e9e9e" .. excerpt .. "|r" end
+            row.text:SetText("|cff7fd77f" .. L["Note"] .. "|r  " .. label)
+            row.open:SetText(L["Open"])
+            row.open.tooltipTitle = L["Open note: %s"]:format(plain)
+            row.open.tooltipText = L["Shows the note in the Item Notes window."]
         elseif item.kind == "quest" then
             local label = ns.QuestLabel(item.ref)
             row.text:SetText("|cffffe066" .. L["Quest"] .. "|r  " .. label)
