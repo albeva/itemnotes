@@ -420,11 +420,16 @@ function ns.CreatePanelList(parent, rowHeight, initRow, updateRow)
 end
 
 -- ---------------------------------------------------------------------------
--- Reference list (items, other notes, quests, recipes and map pins attached to a note)
+-- Reference list (items, other notes, quests, recipes, spells, NPCs and map pins attached to a note)
 -- ---------------------------------------------------------------------------
 
 -- Which Wowhead page a kind of reference has. Notes and map pins have none.
-local WOWHEAD_KIND = { item = "item", quest = "quest", recipe = "spell" }
+local WOWHEAD_KIND = { item = "item", quest = "quest", recipe = "spell", spell = "spell", npc = "npc" }
+
+local function CopyWowheadLink(item)
+    local kind = WOWHEAD_KIND[item.kind]
+    if kind then ns.ShowCopy(ns.WowheadURL(kind, item.value), L["Wowhead link"]) end
+end
 
 -- Returns one row per reference in refs, a note's list of references (or nil for none), in the same order.
 -- A row has the reference's kind, its value (an ID, or for a map pin { mapID, x, y }) and its place in refs.
@@ -448,6 +453,11 @@ function ns.OpenRef(item)
         ns.ViewItem(item.value)
     elseif item.kind == "note" then
         ns.ShowNote(item.value)
+    elseif item.kind == "spell" then
+        ns.ViewSpell(item.value)
+    elseif item.kind == "npc" then
+        -- The game has nothing to open for an NPC. Its Wowhead page is the next best thing.
+        CopyWowheadLink(item)
     else
         ns.OpenPin(item.value)
     end
@@ -556,6 +566,12 @@ local function RefText(item)
     elseif kind == "recipe" then
         local label = ns.RecipeLabel(value)
         return "|cffff9d5c" .. L["Recipe"] .. "|r  " .. label, label
+    elseif kind == "spell" then
+        local label = ns.SpellLabel(value)
+        return "|cff5ce0d8" .. L["Spell"] .. "|r  " .. label, label
+    elseif kind == "npc" then
+        local label = ns.NPCLabel(value)
+        return "|cffff8a8a" .. L["NPC"] .. "|r  " .. label, label
     end
     local label = ns.PinLabel(value)
     return "|cff66b8ff" .. L["Map"] .. "|r  " .. label, label
@@ -589,6 +605,10 @@ local function UpdateOpenButton(open, item, plain)
         open.tooltipTitle = canOpen and L["Open recipe: %s"]:format(plain)
             or L["This character does not have the profession for this recipe"]
         open.tooltipText = canOpen and L["Opens the crafting window at this recipe."] or nil
+    elseif kind == "spell" then
+        open:SetText(L["View"])
+        open.tooltipTitle = L["View spell: %s"]:format(plain)
+        open.tooltipText = L["Pins the spell tooltip on screen."]
     else
         open:SetText(L["Show"])
         open.tooltipTitle = L["Show on map: %s"]:format(plain)
@@ -598,10 +618,10 @@ local function UpdateOpenButton(open, item, plain)
 end
 
 -- A list of a note's references, one per row. It comes in two forms:
---   for reading (no onRemove): each row has buttons to open the reference in game and, for items, quests and
---     recipes, to copy its Wowhead link
+--   for reading (no onRemove): each row has buttons to open the reference in game (not for an NPC, which the
+--     game has nothing to open for) and, for all but notes and map pins, to copy its Wowhead link
 --   for editing (onRemove(item) given): each row has a remove button and nothing else
--- Pass onDrop() to accept dragged items. Double-clicking a row opens its reference in either form.
+-- Pass onDrop() to accept dragged items and spells. Double-clicking a row opens its reference in either form.
 function ns.CreateRefList(parent, onRemove, onDrop)
     return ns.CreatePanelList(parent, 24, function(row)
         ns.AddHighlight(row)
@@ -615,11 +635,13 @@ function ns.CreateRefList(parent, onRemove, onDrop)
             if item.kind == "item" or item.kind == "note" then
                 -- For a note reference the item tooltip also carries the referenced note's text.
                 ns.ShowItemTooltip(self, item.value, "ANCHOR_LEFT")
+            elseif item.kind == "spell" and GameTooltip.SetSpellByID then
+                GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+                GameTooltip:SetSpellByID(item.value)
+                GameTooltip:Show()
             else
                 -- Full text, in case the row is too narrow to show it all.
-                local label = item.kind == "quest" and ns.QuestLabel(item.value)
-                    or item.kind == "recipe" and ns.RecipeLabel(item.value)
-                    or ns.PinLabel(item.value)
+                local _, label = RefText(item)
                 GameTooltip:SetOwner(self, "ANCHOR_LEFT")
                 GameTooltip:AddLine(label, 1, 1, 1, true)
                 GameTooltip:Show()
@@ -645,9 +667,7 @@ function ns.CreateRefList(parent, onRemove, onDrop)
             -- A disabled button still explains itself on hover.
             if row.open.SetMotionScriptsWhileDisabled then row.open:SetMotionScriptsWhileDisabled(true) end
             row.link = ns.CreateButton(row, L["Wowhead"], 78, function()
-                local item = row.item
-                local kind = item and WOWHEAD_KIND[item.kind]
-                if kind then ns.ShowCopy(ns.WowheadURL(kind, item.value), L["Wowhead link"]) end
+                if row.item then CopyWowheadLink(row.item) end
             end)
             row.link:SetHeight(20)
             row.link:SetPoint("RIGHT", row.open, "LEFT", -2, 0)
@@ -666,7 +686,11 @@ function ns.CreateRefList(parent, onRemove, onDrop)
             row.link:SetShown(hasLink)
             -- Without the Wowhead button the text runs up to the open button.
             row.text:SetPoint("RIGHT", hasLink and row.link or row.open, "LEFT", -8, 0)
-            UpdateOpenButton(row.open, item, plain)
+            -- Without the open button the Wowhead button takes its place.
+            local hasOpen = item.kind ~= "npc"
+            row.open:SetShown(hasOpen)
+            row.link:SetPoint("RIGHT", hasOpen and row.open or row, hasOpen and "LEFT" or "RIGHT", -2, 0)
+            if hasOpen then UpdateOpenButton(row.open, item, plain) end
         end
     end)
 end

@@ -153,7 +153,8 @@ function ns.RecordedText(note, short)
     return table.concat(lines, "\n")
 end
 
--- Wowhead database for the Forever client. kind is "item", "quest" or "spell" (a crafting recipe is a spell).
+-- Wowhead database for the Forever client. kind is "item", "quest", "spell" (a crafting recipe is a spell too)
+-- or "npc".
 function ns.WowheadURL(kind, id)
     return "https://www.wowhead.com/forever/" .. kind .. "=" .. id
 end
@@ -185,14 +186,18 @@ function ns.LinkInChat(itemID)
     if not (open and pcall(open, link)) then ns.Print(link) end
 end
 
--- Pins the item's tooltip on screen, like clicking an item link in chat.
-function ns.ViewItem(itemID)
-    local shown = ns.Try(function()
+-- Pins the tooltip of a link ("item:123", "spell:456") on screen, like clicking that link in chat. Returns
+-- false when the client could not show it.
+local function PinTooltip(link)
+    return ns.Try(function()
         ShowUIPanel(ItemRefTooltip)
         if not ItemRefTooltip:IsShown() then ItemRefTooltip:SetOwner(UIParent, "ANCHOR_PRESERVE") end
-        ItemRefTooltip:SetHyperlink("item:" .. itemID)
+        ItemRefTooltip:SetHyperlink(link)
     end)
-    if not shown then ns.Print(L["Could not show item %d."]:format(itemID)) end
+end
+
+function ns.ViewItem(itemID)
+    if not PinTooltip("item:" .. itemID) then ns.Print(L["Could not show item %d."]:format(itemID)) end
 end
 
 -- ---------------------------------------------------------------------------
@@ -351,8 +356,7 @@ function ns.RecipeName(recipeID)
         local info = C_TradeSkillUI.GetRecipeInfo(recipeID)
         name = info and info.name
     end
-    if not name and C_Spell and C_Spell.GetSpellName then name = C_Spell.GetSpellName(recipeID) end
-    return PublicString(name) and name ~= "" and name or nil
+    return PublicString(name) and name ~= "" and name or ns.SpellName(recipeID)
 end
 
 -- Like a quest's title, a recipe's name is remembered once seen.
@@ -377,6 +381,64 @@ function ns.OpenRecipe(recipeID)
     if ns.CanOpenRecipe(recipeID) and ns.Try(function() C_TradeSkillUI.OpenRecipe(recipeID) end) then return end
     ns.Print(L["%s (recipe %d) needs a profession this character does not have."]
         :format(ns.RecipeLabel(recipeID), recipeID))
+end
+
+-- ---------------------------------------------------------------------------
+-- Spells
+-- ---------------------------------------------------------------------------
+
+function ns.SpellName(spellID)
+    local name
+    if C_Spell and C_Spell.GetSpellName then
+        name = C_Spell.GetSpellName(spellID)
+    elseif GetSpellInfo then
+        name = GetSpellInfo(spellID)
+    end
+    return PublicString(name) and name ~= "" and name or nil
+end
+
+-- The client can always name a spell, but a search looks through remembered names only.
+function ns.SpellLabel(spellID)
+    local name = ns.CachedName("spells", spellID)
+    if not name then
+        name = ns.SpellName(spellID)
+        ns.Remember("spells", spellID, name)
+    end
+    return name or L["Spell #%d"]:format(spellID)
+end
+
+-- Pins the spell's tooltip on screen, like clicking a spell link in chat.
+function ns.ViewSpell(spellID)
+    if not PinTooltip("spell:" .. spellID) then ns.Print(L["Could not show spell %d."]:format(spellID)) end
+end
+
+-- ---------------------------------------------------------------------------
+-- NPCs
+-- ---------------------------------------------------------------------------
+
+-- The client cannot name an NPC by its ID: the name seen when the NPC was attached is all there is.
+function ns.NPCLabel(npcID)
+    return ns.CachedName("npcs", npcID) or L["NPC #%d"]:format(npcID)
+end
+
+-- Returns the NPC's ID from a unit's GUID, "Creature-0-<server>-<instance>-<zone>-<npcID>-<spawn>", or nil for
+-- a GUID that is not an NPC's: a player's, a pet's.
+local function NPCFromGUID(guid)
+    if not PublicString(guid) then return nil end
+    local unitType, id = guid:match("^(%a+)%-%d+%-%d+%-%d+%-%d+%-(%d+)%-%x+$")
+    if unitType ~= "Creature" and unitType ~= "Vehicle" then return nil end
+    id = tonumber(id)
+    return IsID(id) and id or nil
+end
+
+-- Returns the ID and, when the client gives it, the name of the NPC under the mouse: in the world, or the one
+-- a unit frame or a nameplate stands for.
+function ns.HoveredNPC()
+    if not UnitGUID then return nil end
+    local npcID = NPCFromGUID(UnitGUID("mouseover"))
+    if not npcID then return nil end
+    local name = UnitName and UnitName("mouseover")
+    return npcID, PublicString(name) and name ~= "" and name or nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -659,6 +721,26 @@ function ns.HoveredItem()
     if tooltip.GetPrimaryTooltipData and Enum and Enum.TooltipDataType then
         local data = tooltip:GetPrimaryTooltipData()
         if data and data.type == Enum.TooltipDataType.Item and PublicNumber(data.id) then return data.id end
+    end
+    return nil
+end
+
+-- Returns the spell ID of whatever spell GameTooltip is currently showing: a spell in the spellbook, on an
+-- action bar, a buff.
+function ns.HoveredSpell()
+    local tooltip = GameTooltip
+    if not tooltip or not tooltip:IsShown() then return nil end
+    if tooltip.GetSpell then
+        -- Returns name, spellID; older clients return name, rank, spellID.
+        local ok, _, second, third = pcall(tooltip.GetSpell, tooltip)
+        if ok then
+            if IsID(third) then return third end
+            if IsID(second) then return second end
+        end
+    end
+    if tooltip.GetPrimaryTooltipData and Enum and Enum.TooltipDataType then
+        local data = tooltip:GetPrimaryTooltipData()
+        if data and data.type == Enum.TooltipDataType.Spell and IsID(data.id) then return data.id end
     end
     return nil
 end

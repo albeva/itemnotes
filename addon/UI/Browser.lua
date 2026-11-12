@@ -19,7 +19,9 @@ local hoveredRow
 local searchText = setmetatable({}, { __mode = "k" })
 
 -- Which cached names a kind of reference is found under. A note is named by its item.
-local NAME_KIND = { item = "items", note = "items", quest = "quests", recipe = "recipes" }
+local NAME_KIND = {
+    item = "items", note = "items", quest = "quests", recipe = "recipes", spell = "spells", npc = "npcs",
+}
 
 local function SearchText(entry)
     local note = entry.note
@@ -349,6 +351,8 @@ local REF_SUMMARY = {
     { "note", L["%d note"], L["%d notes"] },
     { "quest", L["%d quest"], L["%d quests"] },
     { "recipe", L["%d recipe"], L["%d recipes"] },
+    { "spell", L["%d spell"], L["%d spells"] },
+    { "npc", L["%d NPC"], L["%d NPCs"] },
     { "pin", L["%d location"], L["%d locations"] },
 }
 -- Scratch tables for RefSummary, which runs for every row drawn.

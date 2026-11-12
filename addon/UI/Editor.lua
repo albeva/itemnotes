@@ -36,7 +36,7 @@ local function IsDirty()
 end
 
 -- ---------------------------------------------------------------------------
--- References (items, other notes, quests, recipes and map pins) being edited
+-- References (items, other notes, quests, recipes, spells, NPCs and map pins) being edited
 -- ---------------------------------------------------------------------------
 
 -- editor.attached is the list of references being edited, in the form a note stores them (see
@@ -87,12 +87,27 @@ local function AddItem(itemID)
     if itemID ~= editor.itemID then AddRef(ns.Ref("item", itemID)) end
 end
 
--- Attaches the item currently held on the cursor (dragged from a bag, for example).
-local function TakeCursorItem()
-    local kind, itemID = GetCursorInfo()
-    if kind == "item" and type(itemID) == "number" then
+-- The name is remembered now so that a search finds the spell by it.
+local function AddSpell(spellID)
+    ns.Remember("spells", spellID, ns.SpellName(spellID))
+    AddRef(ns.Ref("spell", spellID))
+end
+
+-- The client only knows an NPC's name while the NPC is in sight, so it is remembered now.
+local function AddNPC(npcID, name)
+    ns.Remember("npcs", npcID, name)
+    AddRef(ns.Ref("npc", npcID))
+end
+
+-- Attaches the item or the spell currently held on the cursor (dragged from a bag or the spellbook).
+local function TakeCursor()
+    local kind, id, _, spellID = GetCursorInfo()
+    if kind == "item" and type(id) == "number" then
         ClearCursor()
-        AddItem(itemID)
+        AddItem(id)
+    elseif kind == "spell" and ns.IsID(spellID) then
+        ClearCursor()
+        AddSpell(spellID)
     end
 end
 
@@ -125,8 +140,11 @@ local function AddPin(pin, problem)
 end
 
 -- ---------------------------------------------------------------------------
--- Shift-click a quest (tracker, quest log, Questie tracker) or a recipe (crafting window, trackers) to attach it
+-- Shift-click to attach
 -- ---------------------------------------------------------------------------
+
+-- A quest (tracker, quest log, Questie tracker) and a recipe (crafting window, trackers) are found by the frame
+-- that was clicked. An item and a spell are whatever the tooltip shows, an NPC is the unit under the mouse.
 
 local function ValidQuestID(value, mustBeInLog)
     if not ns.IsID(value) then return false end
@@ -247,6 +265,12 @@ local function HideStackSplit()
     if StackSplitFrame and StackSplitFrame:IsShown() then StackSplitFrame:Hide() end
 end
 
+-- Blizzard's own shift-click on a spell in the spellbook can pick the spell up. The click was meant for us: put
+-- it back, unless the cursor was holding something before the click.
+local function DropPickedSpell(wasHolding)
+    if not wasHolding and GetCursorInfo() == "spell" then ClearCursor() end
+end
+
 -- Undoes what the clicked frame's own handler does with the shift-click that attached a reference.
 local pendingUndo
 
@@ -276,7 +300,19 @@ local function OnGlobalMouse(_, event, button)
             if itemID then
                 AddItem(itemID)
                 pendingUndo = HideStackSplit
+                return
             end
+            -- Or whatever spell (spellbook, action bar, buff...).
+            local spellID = ns.HoveredSpell()
+            if spellID then
+                local wasHolding = GetCursorInfo() ~= nil
+                pendingUndo = function() DropPickedSpell(wasHolding) end
+                AddSpell(spellID)
+                return
+            end
+            -- Or the NPC: in the world, or the one a unit frame stands for.
+            local npcID, npcName = ns.HoveredNPC()
+            if npcID then AddNPC(npcID, npcName) end
         end
     elseif event == "GLOBAL_MOUSE_UP" then
         -- Mouse released: the clicked frame's own handler has run by the next frame. Undo its side effects.
@@ -353,9 +389,9 @@ local function CreateEditor()
     editor.meta = ns.Text(editor, "small", "muted")
     editor.meta:SetPoint("TOPLEFT", editor.name, "BOTTOMLEFT", 0, -4)
 
-    -- Dropping an item anywhere on the window attaches it as a reference.
-    editor:SetScript("OnReceiveDrag", TakeCursorItem)
-    editor:SetScript("OnMouseUp", TakeCursorItem)
+    -- Dropping an item or a spell anywhere on the window attaches it as a reference.
+    editor:SetScript("OnReceiveDrag", TakeCursor)
+    editor:SetScript("OnMouseUp", TakeCursor)
 
     -- Note text: the standard single-line input box. Enter saves.
     local noteLabel = ns.Caption(editor, L["Note"])
@@ -376,22 +412,22 @@ local function CreateEditor()
 
     local refHint = ns.Text(editor, "small", "muted")
     refHint:SetPoint("TOPRIGHT", -14, -122)
-    refHint:SetText(L["Shift-click a quest, recipe, item or note to attach it"])
+    refHint:SetText(L["Shift-click an item, quest, recipe, spell, NPC or note"])
 
     local refPanel
-    refPanel, editor.refs = ns.CreateRefList(editor, RemoveRef, TakeCursorItem)
+    refPanel, editor.refs = ns.CreateRefList(editor, RemoveRef, TakeCursor)
     refPanel:SetPoint("TOPLEFT", 14, -136)
     refPanel:SetSize(412, 96)
     refPanel:EnableMouse(true)
-    refPanel:SetScript("OnReceiveDrag", TakeCursorItem)
-    refPanel:SetScript("OnMouseUp", TakeCursorItem)
+    refPanel:SetScript("OnReceiveDrag", TakeCursor)
+    refPanel:SetScript("OnMouseUp", TakeCursor)
 
     editor.noRefs = ns.Text(refPanel, "small", "muted")
     editor.noRefs:SetPoint("CENTER")
     editor.noRefs:SetJustifyH("CENTER")
-    editor.noRefs:SetText(L["No items, notes, quests, recipes or map locations attached.\nShift-click a quest, recipe or item anywhere in the game, or a\nnote in the Item Notes window. Or drag an item onto this window."])
+    editor.noRefs:SetText(L["Nothing attached yet. Shift-click a quest, recipe, item, spell\nor NPC anywhere in the game, or a note in the Item Notes\nwindow. Or drag an item or a spell onto this window."])
 
-    -- Quests, recipes, items and notes are attached by shift-click. Only map locations need buttons.
+    -- Everything else is attached by shift-click. Only map locations need buttons.
     local addHere = ns.CreateButton(editor, L["Add My Location"], 140, function()
         AddPin(ns.GetPlayerPin(), L["Your position is not available here (instances have no map coordinates)."])
     end)

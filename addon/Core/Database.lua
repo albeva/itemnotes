@@ -21,6 +21,7 @@ local IsID = ns.IsID
 --   cache = {                                      -- names the client cannot always give, one entry per ID
 --       items = { [itemID] = "name" }, quality = { [itemID] = n },
 --       quests = { [questID] = "title" }, recipes = { [spellID] = "name" },
+--       spells = { [spellID] = "name" }, npcs = { [npcID] = "name" },
 --   },
 --   window = { ... },                              -- the Item Notes window's layout; see UI\Browser.lua
 --   invalid = { ... },                             -- entries of notes that could not be read, set aside
@@ -31,6 +32,8 @@ local IsID = ns.IsID
 --   "note:<itemID>"      another item's note
 --   "quest:<questID>"    a quest
 --   "recipe:<spellID>"   a crafting recipe
+--   "spell:<spellID>"    a spell or ability
+--   "npc:<npcID>"        a named NPC, or a kind of mob: every spawn of a mob shares one ID
 --   "pin:<mapID>:<x>:<y>"   a map location; x and y are fractions of the map, to four decimals
 --
 -- A note holds each reference once, and holds no refs list while it has none. A reference between two notes is
@@ -83,14 +86,14 @@ end
 -- ---------------------------------------------------------------------------
 
 -- The kinds of reference that are an ID. A map pin is the other kind.
-local ID_KINDS = { item = true, note = true, quest = true, recipe = true }
+local ID_KINDS = { item = true, note = true, quest = true, recipe = true, spell = true, npc = true }
 
 -- A map coordinate, as a fraction of the map's width or height. NaN fails the comparison.
 local function IsCoord(value)
     return type(value) == "number" and value >= 0 and value <= 1
 end
 
--- Returns the reference to an item, a note, a quest or a recipe. kind is "item", "note", "quest" or "recipe".
+-- Returns the reference to anything that is an ID. kind is "item", "note", "quest", "recipe", "spell" or "npc".
 function ns.Ref(kind, id)
     return kind .. ":" .. id
 end
@@ -284,7 +287,7 @@ local function Sanitize(db)
     MirrorNoteRefs(notes)
 
     -- Cached names nothing refers to any more (a deleted note, a removed reference) are dropped here.
-    local used = { item = {}, quest = {}, recipe = {} }
+    local used = { item = {}, quest = {}, recipe = {}, spell = {}, npc = {} }
     used.note = used.item
     for itemID, note in pairs(notes) do
         used.item[itemID] = true
@@ -300,6 +303,8 @@ local function Sanitize(db)
     CleanCache(db.cache, "quality", used.item, "number")
     CleanCache(db.cache, "quests", used.quest, "string")
     CleanCache(db.cache, "recipes", used.recipe, "string")
+    CleanCache(db.cache, "spells", used.spell, "string")
+    CleanCache(db.cache, "npcs", used.npc, "string")
 end
 
 -- ---------------------------------------------------------------------------
@@ -419,7 +424,8 @@ end
 -- ---------------------------------------------------------------------------
 
 -- The client only knows an item's name once the server has sent it, a quest's title while the quest is at
--- hand, and so on. Names are therefore remembered when they are seen. kind is "items", "quests" or "recipes".
+-- hand, an NPC's name while the NPC is in sight, and so on. Names are therefore remembered when they are seen.
+-- kind is "items", "quests", "recipes", "spells" or "npcs".
 
 function ns.CachedName(kind, id)
     return ns.db.cache[kind][id]
