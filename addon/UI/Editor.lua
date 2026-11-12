@@ -166,11 +166,15 @@ local function AddPin(pin, problem)
 end
 
 -- ---------------------------------------------------------------------------
--- Shift-click to attach
+-- Shift-click, or the keybind, to attach
 -- ---------------------------------------------------------------------------
 
--- A quest (tracker, quest log, Questie tracker) and a recipe (crafting window, trackers) are found by the frame
--- that was clicked. An item and a spell are whatever the tooltip shows, an NPC is the unit under the mouse.
+-- Whatever the mouse is over is attached by a shift-click, or by the key bound to adding a note. The key is for
+-- what a click would set off: a spell or a macro on an action bar.
+--
+-- A quest (tracker, quest log, Questie tracker), a recipe (crafting window, trackers) and a macro (action bar)
+-- are found by the frame under the mouse. An item and a spell are whatever the tooltip shows, an NPC is the unit
+-- under the mouse.
 
 local function ValidQuestID(value, mustBeInLog)
     if not ns.IsID(value) then return false end
@@ -242,8 +246,21 @@ local function QuestIn(chain, inTracker)
     return nil
 end
 
--- Returns what the mouse is over that can be attached by ID: "recipe" or "quest", its ID and, for a recipe whose
--- frame has it, its name.
+-- Looks through the frames for an action bar button that holds a macro. Returns the macro's name.
+local function MacroIn(chain)
+    for _, frame in ipairs(chain) do
+        -- The game's own buttons keep their action slot in .action; LibActionButton's (Bartender, ElvUI) keep it
+        -- in ._state_action.
+        local slot = frame.action
+        if not ns.IsID(slot) and frame._state_type == "action" then slot = frame._state_action end
+        local name = ns.IsID(slot) and ns.ActionMacro(slot)
+        if name then return name end
+    end
+    return nil
+end
+
+-- Returns what the frames under the mouse stand for: "recipe" or "quest" and its ID (and, for a recipe whose
+-- frame has it, its name), or "macro" and its name.
 local function RefUnderMouse()
     local chain, inTracker = FramesUnderMouse()
     -- Recipes first: a tracked recipe's block keeps its ID in .id, which is where a tracked quest keeps its own.
@@ -251,6 +268,8 @@ local function RefUnderMouse()
     if recipeID then return "recipe", recipeID, name end
     local questID = QuestIn(chain, inTracker)
     if questID then return "quest", questID end
+    local macro = MacroIn(chain)
+    if macro then return "macro", macro end
     return nil
 end
 
@@ -297,48 +316,100 @@ local function DropPickedSpell(wasHolding)
     if not wasHolding and GetCursorInfo() == "spell" then ClearCursor() end
 end
 
+-- Attaches whatever the mouse is over. Returns whether there was anything to attach and, where a shift-click
+-- makes the frame under the mouse do something of its own, a function that undoes it.
+local function AttachHovered()
+    local ok, kind, id, name = pcall(RefUnderMouse)
+    if ok and kind == "recipe" then
+        local wasTracked = IsRecipeTracked(id)
+        AddRecipe(id, name)
+        return true, function() RestoreRecipeTracked(id, wasTracked) end
+    elseif ok and kind == "quest" then
+        local wasWatched = IsWatched(id)
+        AddQuest(id)
+        return true, function() RestoreWatch(id, wasWatched) end
+    elseif ok and kind == "macro" then
+        -- Before the tooltip is asked: on an action bar it shows the spell or the item the macro uses.
+        AddRef(ns.Ref("macro", id))
+        return true
+    elseif editor:IsMouseOver() then
+        return false
+    end
+    -- A note in the Item Notes window is attached as a note, not as its bare item.
+    local noteID = ns.HoveredNote()
+    if noteID then
+        AddNote(noteID)
+        return true
+    end
+    -- Whatever item the mouse is hovering (bag slot, quest reward, list row...).
+    local itemID = ns.HoveredItem()
+    if itemID then
+        AddItem(itemID)
+        return true, HideStackSplit
+    end
+    -- Or whatever spell (spellbook, action bar, buff...).
+    local spellID = ns.HoveredSpell()
+    if spellID then
+        local wasHolding = GetCursorInfo() ~= nil
+        AddSpell(spellID)
+        return true, function() DropPickedSpell(wasHolding) end
+    end
+    -- Or the NPC: in the world, or the one a unit frame stands for.
+    local npcID, npcName = ns.HoveredNPC()
+    if npcID then
+        AddNPC(npcID, npcName)
+        return true
+    end
+    return false
+end
+
+-- The key bound to adding a note was pressed while the editor is open. Nothing was clicked, so there is nothing
+-- to undo.
+function ns.AttachHovered()
+    if not AttachHovered() then
+        ns.Print(L["Hover over an item, quest, recipe, spell, macro, NPC or note first, then press the keybind."])
+    end
+end
+
+-- Whether the key going down, with the modifiers that are held, is one bound to adding a note.
+local function IsEditKey(key)
+    local chord = (IsAltKeyDown() and "ALT-" or "") .. (IsControlKeyDown() and "CTRL-" or "")
+        .. (IsShiftKeyDown() and "SHIFT-" or "") .. (IsMetaKeyDown and IsMetaKeyDown() and "META-" or "") .. key
+    local first, second = GetBindingKey("ITEMNOTES_EDIT")
+    return chord == first or chord == second
+end
+
+-- The input box takes every key press while it has focus, so the game never runs the keybind: the box acts on
+-- it instead.
+local function OnEditKeyDown(self, key)
+    if not IsEditKey(key) then return end
+    local text, cursor = self:GetText(), self:GetCursorPosition()
+    ns.AttachHovered()
+    -- The key may type a character as well (with Option held, a Mac does). Take it back out.
+    C_Timer.After(0, function()
+        if self:GetText() ~= text then
+            self:SetText(text)
+            self:SetCursorPosition(cursor)
+        end
+    end)
+end
+
+-- What the hint above the references says: how to attach one.
+local function AttachHint()
+    local key = GetBindingKey("ITEMNOTES_EDIT")
+    if not key then return L["Shift-click an item, quest, recipe, spell, macro, NPC or note"] end
+    return L["Shift-click, or hover and press %s, to attach"]:format(GetBindingText and GetBindingText(key) or key)
+end
+
 -- Undoes what the clicked frame's own handler does with the shift-click that attached a reference.
 local pendingUndo
 
 local function OnGlobalMouse(_, event, button)
     if event == "GLOBAL_MOUSE_DOWN" then
         pendingUndo = nil
-        if button ~= "LeftButton" or not IsShiftKeyDown() then return end
-        local ok, kind, id, name = pcall(RefUnderMouse)
-        if ok and kind == "recipe" then
-            local wasTracked = IsRecipeTracked(id)
-            pendingUndo = function() RestoreRecipeTracked(id, wasTracked) end
-            AddRecipe(id, name)
-        elseif ok and kind == "quest" then
-            local wasWatched = IsWatched(id)
-            pendingUndo = function() RestoreWatch(id, wasWatched) end
-            AddQuest(id)
-        elseif not editor:IsMouseOver() then
-            -- A note in the Item Notes window is attached as a note, not as its bare item.
-            local noteID = ns.HoveredNote()
-            if noteID then
-                AddNote(noteID)
-                return
-            end
-            -- Not a quest or a recipe: attach whatever item the mouse is hovering (bag slot, quest reward, list
-            -- row...).
-            local itemID = ns.HoveredItem()
-            if itemID then
-                AddItem(itemID)
-                pendingUndo = HideStackSplit
-                return
-            end
-            -- Or whatever spell (spellbook, action bar, buff...).
-            local spellID = ns.HoveredSpell()
-            if spellID then
-                local wasHolding = GetCursorInfo() ~= nil
-                pendingUndo = function() DropPickedSpell(wasHolding) end
-                AddSpell(spellID)
-                return
-            end
-            -- Or the NPC: in the world, or the one a unit frame stands for.
-            local npcID, npcName = ns.HoveredNPC()
-            if npcID then AddNPC(npcID, npcName) end
+        if button == "LeftButton" and IsShiftKeyDown() then
+            local _, undo = AttachHovered()
+            pendingUndo = undo
         end
     elseif event == "GLOBAL_MOUSE_UP" then
         -- Mouse released: the clicked frame's own handler has run by the next frame. Undo its side effects.
@@ -430,15 +501,16 @@ local function CreateEditor()
     edit:SetPoint("TOPLEFT", 20, -93)
     edit:SetMaxLetters(500)
     edit:SetScript("OnEnterPressed", Save)
+    edit:SetScript("OnKeyDown", OnEditKeyDown)
     editor.edit = edit
 
     -- References
     local refLabel = ns.Caption(editor, L["References"])
     refLabel:SetPoint("TOPLEFT", 14, -121)
 
+    -- Filled in whenever the editor is shown: it names the keybind, which can change.
     local refHint = ns.Text(editor, "small", "muted")
     refHint:SetPoint("TOPRIGHT", -14, -122)
-    refHint:SetText(L["Shift-click an item, quest, recipe, spell, NPC or note"])
 
     local refPanel
     refPanel, editor.refs = ns.CreateRefList(editor, RemoveRef, TakeCursor)
@@ -486,6 +558,7 @@ local function CreateEditor()
     -- Watch mouse clicks only while the editor is open.
     editor:SetScript("OnEvent", OnGlobalMouse)
     editor:SetScript("OnShow", function(self)
+        refHint:SetText(AttachHint())
         -- Not every client has these events; without them shift-click attaching is simply unavailable.
         pcall(self.RegisterEvent, self, "GLOBAL_MOUSE_DOWN")
         pcall(self.RegisterEvent, self, "GLOBAL_MOUSE_UP")

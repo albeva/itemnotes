@@ -37,7 +37,7 @@ local function Sync()
     local key = GetBindingKey("ITEMNOTES_EDIT")
     local shown = key and (GetBindingText and GetBindingText(key) or key) or L["not set"]
     bindText:SetText(L["Add / edit note for hovered item"] .. ": |cffffd100" .. shown .. "|r\n"
-        .. L["Change it under Options > Keybindings > AddOns > Item Notes. Hover over any item and press the key to add, edit or remove its note."])
+        .. L["Change it under Options > Keybindings > AddOns > Item Notes. Hover over any item and press the key to add, edit or remove its note. While a note is open, the key attaches what the mouse is over instead."])
 end
 
 canvas:SetScript("OnShow", Sync)

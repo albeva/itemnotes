@@ -29,6 +29,7 @@ While the editor is open:
 - **Shift-click** a spell in the spellbook to attach it
 - **Shift-click** an NPC in the world, or its unit frame, to attach it
 - **Shift-click** a note in the Item Notes window to attach that note
+- **Hover and press the keybind** to attach any of these without clicking: a spell or a macro on an action bar, which a click would set off
 - **Drag** an item, a spell or a macro onto the window to attach it
 - **Add My Location** / **Add Map Pin** attach a map location
 
@@ -36,7 +37,7 @@ A new note for an item that belongs to a quest starts with that quest attached: 
 
 A recipe reference opens the crafting window at that recipe, on a character that has the profession.
 
-A spell reference shows the spell's tooltip. An NPC reference keeps the NPC's name and gives its Wowhead link; the game has nothing to open for an NPC. For a mob it stands for the kind, not the one you clicked: shift-click any Defias Bandit and the reference covers all of them. Shift-clicking an NPC also targets it, and shift-clicking a spell on an action bar also casts it, so attach spells from the spellbook.
+A spell reference shows the spell's tooltip. An NPC reference keeps the NPC's name and gives its Wowhead link; the game has nothing to open for an NPC. For a mob it stands for the kind, not the one you clicked: shift-click any Defias Bandit and the reference covers all of them. Shift-clicking an NPC also targets it, and shift-clicking a spell or a macro on an action bar also uses it: hover it and press the keybind instead.
 
 A macro reference is kept by the macro's name, since the game gives macros no lasting ID. It shows the macro's commands and **Take** puts the macro on your cursor, on a character that has a macro by that name. Rename the macro and the reference follows it; delete the macro and the reference is removed from every note.
 
@@ -58,7 +59,7 @@ Double-click a note to edit it. Drag an item onto the window to add a new note.
 
 ## Setup
 
-Set the keybind under **Options > Keybindings > AddOns > Item Notes**. There is no default key.
+The keybind is **Alt-Shift-N** by default. Change it under **Options > Keybindings > AddOns > Item Notes**.
 
 ## Commands
 

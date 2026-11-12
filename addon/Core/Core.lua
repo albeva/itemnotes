@@ -466,6 +466,16 @@ function ns.FindMacro(name)
     return index, PublicString(body) and body or ""
 end
 
+-- Returns the name of the macro in an action bar slot, or nil when the slot holds anything else.
+function ns.ActionMacro(slot)
+    if not (GetActionInfo and GetActionText) then return nil end
+    local kind = GetActionInfo(slot)
+    if not PublicString(kind) or kind ~= "macro" then return nil end
+    -- The slot's label is the macro's name. What the slot gives as the macro's ID differs between clients.
+    local name = GetActionText(slot)
+    return PublicString(name) and name ~= "" and ns.FindMacro(name) and name or nil
+end
+
 -- Puts the macro on the cursor, ready to be placed on an action bar.
 function ns.TakeMacro(name)
     local index = ns.FindMacro(name)
@@ -850,6 +860,11 @@ end
 
 function ItemNotes_EditHovered()
     if not Ready() then return end
+    -- While a note is being edited, the key attaches what the mouse is over instead, like a shift-click.
+    if ns.IsEditorOpen() then
+        ns.AttachHovered()
+        return
+    end
     local itemID = ns.HoveredItem()
     if not itemID then
         ns.Print(L["Hover over an item first, then press the keybind."])
