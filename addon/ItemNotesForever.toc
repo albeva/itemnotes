@@ -9,7 +9,7 @@
 ## AddonCompartmentFunc: ItemNotes_OnAddonCompartmentClick
 ## Category-enUS: Inventory
 ## X-License: MIT
-## X-Website: https://github.com/albeva/itemnotes
+## X-Website: https://www.curseforge.com/wow/addons/itemnotesforever
 ## X-Curse-Project-ID: 1799129
 
 Core\Locale.lua
