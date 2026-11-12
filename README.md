@@ -71,7 +71,9 @@ The keybind is **Alt-Shift-N** by default. Change it under **Options > Keybindin
 
 ## Install
 
-The addon itself lives in the `addon` folder of this repository. Copy that folder into your AddOns folder and name it `ItemNotesForever`:
+Download the latest zip from [Releases](https://github.com/albeva/itemnotes/releases) and extract it into your AddOns folder.
+
+To run it from source instead: the addon itself lives in the `addon` folder of this repository. Copy that folder into your AddOns folder and name it `ItemNotesForever`:
 
 ```
 World of Warcraft/_forever_/Interface/AddOns/ItemNotesForever/ItemNotesForever.toc
@@ -100,9 +102,21 @@ Restart the game.
 | Path | Contents |
 |---|---|
 | `addon/` | Everything the game loads, plus lint config |
-| `.pkgmeta` | CurseForge packaging config |
+| `.pkgmeta` | Packaging config |
+| `.github/workflows/release.yml` | Builds and publishes a release when a version tag is pushed |
 | `art/` | Icon source (SVG) and a 512px render |
 | `screenshots/` | Images for this page |
+
+## Releasing
+
+Pushing a version tag builds the addon package and publishes it under [Releases](https://github.com/albeva/itemnotes/releases). Commits without a tag publish nothing.
+
+```
+git tag 1.0.0
+git push origin 1.0.0
+```
+
+The tag becomes the addon's version, and `CHANGELOG.md` becomes the release notes. A tag containing `alpha` or `beta` is published as a pre-release.
 
 ## License
 

@@ -1,0 +1,27 @@
+name: Release
+
+# Runs only when a version tag is pushed (1.0.0, 1.0.0-alpha4, ...), never on ordinary commits.
+on:
+  push:
+    tags:
+      - '[0-9]*'
+
+permissions:
+  contents: write # create the release and attach the package to it
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the packager reads the tags and the history
+
+      # Builds ItemNotesForever-<tag>.zip as .pkgmeta describes, with the tag as the TOC's version, and publishes
+      # it as a GitHub release with CHANGELOG.md as its notes. A tag containing "alpha" or "beta" becomes a
+      # pre-release. No CurseForge, Wago or WoWInterface token is passed, so nothing is uploaded to them.
+      - uses: BigWigsMods/packager@v2
+        with:
+          pandoc: false # only needed for WoWInterface uploads
+        env:
+          GH_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
