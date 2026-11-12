@@ -4,7 +4,18 @@
 
 ### Added
 
-- Notes can reference crafting recipes. Shift-click a recipe in the crafting window, or a tracked recipe, while the editor is open. Open shows the recipe in the crafting window.
+- Notes can reference crafting recipes. Shift-click a recipe while the editor is open.
+
+### Changed
+
+- New saved-data format. Existing notes are converted automatically.
+- References show in the order they were attached.
+- References in the editor have only a remove button.
+- Sorting by name ignores case.
+
+### Fixed
+
+- Loading, searching and bag changes stay fast with many notes.
 
 ## 1.0.0-alpha3 - 2026-11-11
 

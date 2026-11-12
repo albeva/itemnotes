@@ -9,14 +9,21 @@ local draft
 -- Set by Save, Cancel and Delete: the editor is closing on purpose, so nothing is kept as a draft.
 local closing = false
 
+-- Returns a copy of a list; an empty one for no list. A note without references has no list of them.
 local function CopyList(list)
     local copy = {}
-    for index, entry in ipairs(list or {}) do
-        local item = {}
-        for key, value in pairs(entry) do item[key] = value end
-        copy[index] = item
+    if list then
+        for index, entry in ipairs(list) do copy[index] = entry end
     end
     return copy
+end
+
+-- Returns where value is in list, or nil.
+local function IndexOf(list, value)
+    for index, entry in ipairs(list) do
+        if entry == value then return index end
+    end
+    return nil
 end
 
 -- Line breaks (from notes written with the earlier multi-line editor) become spaces in the single-line box.
@@ -32,12 +39,17 @@ end
 -- References (items, other notes, quests, recipes and map pins) being edited
 -- ---------------------------------------------------------------------------
 
+-- editor.attached is the list of references being edited, in the form a note stores them (see
+-- Core\Database.lua) and in the order shown. It is the editor's own copy; saving hands it to ns.SaveNote.
+
 local function RefreshRefs()
     -- A referenced note can be deleted while the editor is open, or while a draft waits: drop it here too.
-    for index = #editor.notes, 1, -1 do
-        if not ns.GetNote(editor.notes[index].id) then table.remove(editor.notes, index) end
+    local attached = editor.attached
+    for index = #attached, 1, -1 do
+        local kind, id = ns.ParseRef(attached[index])
+        if kind == "note" and not ns.GetNote(id) then table.remove(attached, index) end
     end
-    local items = ns.RefItems(editor.quests, editor.pins, editor.items, editor.notes, editor.recipes)
+    local items = ns.RefItems(attached)
     editor.refs:SetItems(items)
     editor.noRefs:SetShown(#items == 0)
 end
@@ -53,38 +65,26 @@ local function RefsChanged()
 end
 
 local function RemoveRef(item)
-    local lists = {
-        quest = editor.quests, recipe = editor.recipes, pin = editor.pins, item = editor.items, note = editor.notes,
-    }
-    table.remove(lists[item.kind], item.index)
+    table.remove(editor.attached, item.index)
     RefsChanged()
 end
 
--- Returns the position of the reference to itemID's note in a list of note references, or nil.
-local function FindNoteRef(list, itemID)
-    for index, ref in ipairs(list) do
-        if ref.id == itemID then return index end
-    end
-    return nil
+-- Attaches a reference at the end of the list, unless it is attached already.
+local function AddRef(ref)
+    local attached = editor.attached
+    if IndexOf(attached, ref) then return end
+    attached[#attached + 1] = ref
+    RefsChanged()
 end
 
 -- Attaches another item's note. Only an existing note can be referenced, and never the one being edited.
 -- Saving makes the reference two-way: the other note then lists this one too.
 local function AddNote(itemID)
-    if itemID == editor.itemID or not ns.GetNote(itemID) then return end
-    if FindNoteRef(editor.notes, itemID) then return end
-    editor.notes[#editor.notes + 1] = { id = itemID }
-    RefsChanged()
+    if itemID ~= editor.itemID and ns.GetNote(itemID) then AddRef(ns.Ref("note", itemID)) end
 end
 
 local function AddItem(itemID)
-    if itemID == editor.itemID then return end
-    for _, item in ipairs(editor.items) do
-        if item.id == itemID then return end
-    end
-    local name, _, quality = ns.ItemInfo(itemID)
-    editor.items[#editor.items + 1] = { id = itemID, name = name, quality = quality }
-    RefsChanged()
+    if itemID ~= editor.itemID then AddRef(ns.Ref("item", itemID)) end
 end
 
 -- Attaches the item currently held on the cursor (dragged from a bag, for example).
@@ -96,36 +96,32 @@ local function TakeCursorItem()
     end
 end
 
+-- The quest's title is at hand now (it was just clicked) and may not be later, so it is remembered now.
 local function AddQuest(questID)
-    for _, quest in ipairs(editor.quests) do
-        if quest.id == questID then return end
-    end
-    editor.quests[#editor.quests + 1] = { id = questID, title = ns.QuestTitle(questID) }
-    RefsChanged()
+    ns.Remember("quests", questID, ns.QuestTitle(questID))
+    AddRef(ns.Ref("quest", questID))
 end
 
 -- name is the recipe's name when the clicked frame carried it; otherwise the game is asked.
 local function AddRecipe(recipeID, name)
-    for _, recipe in ipairs(editor.recipes) do
-        if recipe.id == recipeID then return end
-    end
     if type(name) ~= "string" or name == "" then name = ns.RecipeName(recipeID) end
-    editor.recipes[#editor.recipes + 1] = { id = recipeID, name = name }
-    RefsChanged()
+    ns.Remember("recipes", recipeID, name)
+    AddRef(ns.Ref("recipe", recipeID))
 end
 
+-- Attaches a map location, unless one within a few yards of it is attached already.
 local function AddPin(pin, problem)
     if not pin then
         ns.Print(problem)
         return
     end
-    for _, existing in ipairs(editor.pins) do
-        if existing.mapID == pin.mapID and math.abs(existing.x - pin.x) < 0.002 and math.abs(existing.y - pin.y) < 0.002 then
+    for _, ref in ipairs(editor.attached) do
+        local kind, mapID, x, y = ns.ParseRef(ref)
+        if kind == "pin" and mapID == pin.mapID and math.abs(x - pin.x) < 0.002 and math.abs(y - pin.y) < 0.002 then
             return
         end
     end
-    editor.pins[#editor.pins + 1] = pin
-    RefsChanged()
+    AddRef(ns.PinRef(pin))
 end
 
 -- ---------------------------------------------------------------------------
@@ -303,21 +299,22 @@ end
 
 local function Save()
     local itemID = editor.itemID
+    local attached = editor.attached
     local text = ns.Trim(editor.edit:GetText())
-    if text == "" and #editor.quests == 0 and #editor.pins == 0 and #editor.items == 0 and #editor.notes == 0
-        and #editor.recipes == 0 then
+    if text == "" and not attached[1] then
         -- Nothing left to keep: an emptied note is removed.
         ns.DeleteNote(itemID)
     else
-        ns.SaveNote(itemID, text, editor.quests, editor.pins, editor.items, editor.notes, editor.recipes)
+        ns.SaveNote(itemID, text, attached)
         if draft then
             -- Unsaved edits wait for another item. References go both ways, so a link to that item made or
             -- removed here must show in them too, or saving them later would undo it.
-            local index = FindNoteRef(draft.notes, itemID)
-            if FindNoteRef(editor.notes, draft.itemID) then
-                if not index then draft.notes[#draft.notes + 1] = { id = itemID } end
+            local back = ns.Ref("note", itemID)
+            local index = IndexOf(draft.attached, back)
+            if IndexOf(attached, ns.Ref("note", draft.itemID)) then
+                if not index then draft.attached[#draft.attached + 1] = back end
             elseif index then
-                table.remove(draft.notes, index)
+                table.remove(draft.attached, index)
             end
         end
     end
@@ -396,9 +393,7 @@ local function CreateEditor()
 
     -- Quests, recipes, items and notes are attached by shift-click. Only map locations need buttons.
     local addHere = ns.CreateButton(editor, L["Add My Location"], 140, function()
-        local loc = ns.CaptureLocation()
-        local pin = loc.mapID and loc.x and { mapID = loc.mapID, x = loc.x, y = loc.y, name = ns.MapName(loc.mapID) }
-        AddPin(pin, L["Your position is not available here (instances have no map coordinates)."])
+        AddPin(ns.GetPlayerPin(), L["Your position is not available here (instances have no map coordinates)."])
     end)
     addHere:SetPoint("TOPLEFT", 14, -238)
     addHere.tooltipTitle = L["Attach where you are standing right now."]
@@ -442,15 +437,7 @@ local function CreateEditor()
         self:UnregisterAllEvents()
         pendingUndo = nil
         if not closing and IsDirty() then
-            draft = {
-                itemID = editor.itemID,
-                text = edit:GetText(),
-                quests = editor.quests,
-                recipes = editor.recipes,
-                pins = editor.pins,
-                items = editor.items,
-                notes = editor.notes,
-            }
+            draft = { itemID = editor.itemID, text = edit:GetText(), attached = editor.attached }
             ns.Print(L["Unsaved changes kept. Open the note again to continue editing."])
         end
         closing = false
@@ -493,24 +480,24 @@ function ns.OpenEditor(itemID, force)
     end
 
     local note = ns.GetNote(itemID)
-    local name, _, quality, icon = ns.ItemInfo(itemID)
-    name = name or (note and note.name)
-    quality = quality or (note and note.quality)
-    icon = icon or (note and note.icon)
+    local name, quality = ns.ItemName(itemID)
 
     editor.itemID = itemID
-    -- A new note starts with the item's quests already attached. They are its starting point, not an edit:
-    -- closing the editor untouched keeps nothing, and removing one is an edit like any other.
-    editor.quests = note and CopyList(note.quests) or ns.QuestsForItem(itemID)
-    editor.recipes = CopyList(note and note.recipes)
-    editor.pins = CopyList(note and note.pins)
-    editor.items = CopyList(note and note.items)
-    editor.notes = CopyList(note and note.notes)
+    if note then
+        editor.attached = CopyList(note.refs)
+    else
+        -- A new note starts with the item's quests already attached. They are its starting point, not an
+        -- edit: closing the editor untouched keeps nothing, and removing one is an edit like any other.
+        editor.attached = {}
+        for index, questID in ipairs(ns.QuestsForItem(itemID)) do
+            editor.attached[index] = ns.Ref("quest", questID)
+        end
+    end
     editor.refsChanged = false
     editor.originalText = SingleLine(note and note.text)
     editor.title:SetText(note and L["Edit Item Note"] or L["New Item Note"])
-    editor.icon.texture:SetTexture(icon or ns.FALLBACK_ICON)
-    editor.name:SetText(ns.ItemName(itemID, name))
+    editor.icon.texture:SetTexture(ns.ItemIcon(itemID))
+    editor.name:SetText(name)
     editor.name:SetTextColor(ns.QualityColor(quality))
     editor.meta:SetText(L["Item ID %d"]:format(itemID))
     editor.edit:SetText(editor.originalText)
@@ -519,8 +506,7 @@ function ns.OpenEditor(itemID, force)
         or L["Your location and the time are recorded when you save."])
 
     if draft and draft.itemID == itemID then
-        editor.quests, editor.pins, editor.items, editor.notes = draft.quests, draft.pins, draft.items, draft.notes
-        editor.recipes = draft.recipes
+        editor.attached = draft.attached
         editor.refsChanged = true
         editor.edit:SetText(draft.text)
         draft = nil

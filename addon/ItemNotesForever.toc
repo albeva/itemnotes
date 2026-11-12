@@ -14,6 +14,7 @@
 
 Core\Locale.lua
 Core\Core.lua
+Core\Database.lua
 
 UI\Widgets.lua
 UI\Editor.lua

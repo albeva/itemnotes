@@ -52,6 +52,9 @@ end
 
 function ns.MakeMovable(frame)
     frame:SetMovable(true)
+    -- The game would otherwise record where each dragged window ends up in its own layout cache, for good.
+    -- The one window whose place is remembered keeps it in the saved notes instead.
+    if frame.SetDontSavePosition then frame:SetDontSavePosition(true) end
     frame:SetClampedToScreen(true)
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
@@ -423,37 +426,30 @@ end
 -- Which Wowhead page a kind of reference has. Notes and map pins have none.
 local WOWHEAD_KIND = { item = "item", quest = "quest", recipe = "spell" }
 
-function ns.RefItems(quests, pins, items, notes, recipes)
-    local refs = {}
-    for index, item in ipairs(items or {}) do
-        refs[#refs + 1] = { kind = "item", index = index, ref = item }
+-- Returns one row per reference in refs, a note's list of references (or nil for none), in the same order.
+-- A row has the reference's kind, its value (an ID, or for a map pin { mapID, x, y }) and its place in refs.
+function ns.RefItems(refs)
+    local rows = {}
+    if refs then
+        for index, ref in ipairs(refs) do
+            local kind, id, x, y = ns.ParseRef(ref)
+            rows[index] = { kind = kind, value = kind == "pin" and { mapID = id, x = x, y = y } or id, index = index }
+        end
     end
-    for index, note in ipairs(notes or {}) do
-        refs[#refs + 1] = { kind = "note", index = index, ref = note }
-    end
-    for index, quest in ipairs(quests or {}) do
-        refs[#refs + 1] = { kind = "quest", index = index, ref = quest }
-    end
-    for index, recipe in ipairs(recipes or {}) do
-        refs[#refs + 1] = { kind = "recipe", index = index, ref = recipe }
-    end
-    for index, pin in ipairs(pins or {}) do
-        refs[#refs + 1] = { kind = "pin", index = index, ref = pin }
-    end
-    return refs
+    return rows
 end
 
 function ns.OpenRef(item)
     if item.kind == "quest" then
-        ns.OpenQuest(item.ref)
+        ns.OpenQuest(item.value)
     elseif item.kind == "recipe" then
-        ns.OpenRecipe(item.ref)
+        ns.OpenRecipe(item.value)
     elseif item.kind == "item" then
-        ns.ViewItem(item.ref.id)
+        ns.ViewItem(item.value)
     elseif item.kind == "note" then
-        ns.ShowNote(item.ref.id)
+        ns.ShowNote(item.value)
     else
-        ns.OpenPin(item.ref)
+        ns.OpenPin(item.value)
     end
 end
 
@@ -540,9 +536,72 @@ function ns.CreateLocateButton(parent, getItemID)
     return button
 end
 
--- Each row has explicit buttons: open the reference in game and, for items, quests and recipes, copy its
--- Wowhead link.
--- Pass onRemove(item) to also give rows a remove button, and onDrop() to accept dragged items.
+-- Returns a reference as a row shows it (its kind in colour, then its name) and its plain name.
+local function RefText(item)
+    local kind, value = item.kind, item.value
+    if kind == "item" then
+        local label, plain = ns.ColoredItemName(value)
+        local count = ns.BagCount(value)
+        if count and count > 0 then label = label .. "  |cffffffffx" .. count .. "|r" end
+        return "|cffc8a2ff" .. L["Item"] .. "|r  " .. label, plain
+    elseif kind == "note" then
+        local label, plain = ns.ColoredItemName(value)
+        local note = ns.GetNote(value)
+        local excerpt = note and ns.Trim(note.text:gsub("%s+", " ")) or ""
+        if excerpt ~= "" then label = label .. "  |cff9e9e9e" .. excerpt .. "|r" end
+        return "|cff7fd77f" .. L["Note"] .. "|r  " .. label, plain
+    elseif kind == "quest" then
+        local label = ns.QuestLabel(value)
+        return "|cffffe066" .. L["Quest"] .. "|r  " .. label, label
+    elseif kind == "recipe" then
+        local label = ns.RecipeLabel(value)
+        return "|cffff9d5c" .. L["Recipe"] .. "|r  " .. label, label
+    end
+    local label = ns.PinLabel(value)
+    return "|cff66b8ff" .. L["Map"] .. "|r  " .. label, label
+end
+
+-- Sets a row's open button up for its reference: what it says, its tooltip and whether it can be pressed.
+-- plain is the reference's plain name.
+local function UpdateOpenButton(open, item, plain)
+    local kind, value = item.kind, item.value
+    -- Rows are reused: only a quest or a recipe that cannot be opened turns the button off.
+    local canOpen = true
+    if kind == "item" then
+        open:SetText(L["View"])
+        open.tooltipTitle = L["View item: %s"]:format(plain)
+        open.tooltipText = L["Pins the item tooltip on screen."]
+    elseif kind == "note" then
+        open:SetText(L["Open"])
+        open.tooltipTitle = L["Open note: %s"]:format(plain)
+        open.tooltipText = L["Shows the note in the Item Notes window."]
+    elseif kind == "quest" then
+        -- Only a quest in the quest log has a page to open.
+        local status, logIndex = ns.QuestStatus(value)
+        canOpen = logIndex ~= nil
+        open:SetText(L["Open"])
+        open.tooltipTitle = canOpen and L["Open quest: %s"]:format(plain) or L["This quest is not in your quest log"]
+        open.tooltipText = L["Quest ID %d - %s"]:format(value, status)
+    elseif kind == "recipe" then
+        -- Only a character with the recipe's profession has a crafting window to open it in.
+        canOpen = ns.CanOpenRecipe(value)
+        open:SetText(L["Open"])
+        open.tooltipTitle = canOpen and L["Open recipe: %s"]:format(plain)
+            or L["This character does not have the profession for this recipe"]
+        open.tooltipText = canOpen and L["Opens the crafting window at this recipe."] or nil
+    else
+        open:SetText(L["Show"])
+        open.tooltipTitle = L["Show on map: %s"]:format(plain)
+        open.tooltipText = L["Opens the world map there and sets a waypoint."]
+    end
+    open:SetEnabled(canOpen)
+end
+
+-- A list of a note's references, one per row. It comes in two forms:
+--   for reading (no onRemove): each row has buttons to open the reference in game and, for items, quests and
+--     recipes, to copy its Wowhead link
+--   for editing (onRemove(item) given): each row has a remove button and nothing else
+-- Pass onDrop() to accept dragged items. Double-clicking a row opens its reference in either form.
 function ns.CreateRefList(parent, onRemove, onDrop)
     return ns.CreatePanelList(parent, 24, function(row)
         ns.AddHighlight(row)
@@ -555,99 +614,59 @@ function ns.CreateRefList(parent, onRemove, onDrop)
             if not item then return end
             if item.kind == "item" or item.kind == "note" then
                 -- For a note reference the item tooltip also carries the referenced note's text.
-                ns.ShowItemTooltip(self, item.ref.id, "ANCHOR_LEFT")
+                ns.ShowItemTooltip(self, item.value, "ANCHOR_LEFT")
             else
                 -- Full text, in case the row is too narrow to show it all.
-                local label = item.kind == "quest" and ns.QuestLabel(item.ref)
-                    or item.kind == "recipe" and ns.RecipeLabel(item.ref)
-                    or ns.PinLabel(item.ref)
+                local label = item.kind == "quest" and ns.QuestLabel(item.value)
+                    or item.kind == "recipe" and ns.RecipeLabel(item.value)
+                    or ns.PinLabel(item.value)
                 GameTooltip:SetOwner(self, "ANCHOR_LEFT")
                 GameTooltip:AddLine(label, 1, 1, 1, true)
                 GameTooltip:Show()
             end
         end)
         row:SetScript("OnLeave", GameTooltip_Hide)
-        local right = -2
+        row:SetScript("OnDoubleClick", function(self)
+            if self.item then ns.OpenRef(self.item) end
+        end)
+
         if onRemove then
             row.remove = ns.CreateRemoveButton(row, function()
                 if row.item then onRemove(row.item) end
             end)
-            row.remove:SetPoint("RIGHT", right, 0)
+            row.remove:SetPoint("RIGHT", -2, 0)
             row.remove.tooltipTitle = L["Remove this reference"]
-            right = right - 24
+        else
+            row.open = ns.CreateButton(row, "", 58, function()
+                if row.item then ns.OpenRef(row.item) end
+            end)
+            row.open:SetHeight(20)
+            row.open:SetPoint("RIGHT", -2, 0)
+            -- A disabled button still explains itself on hover.
+            if row.open.SetMotionScriptsWhileDisabled then row.open:SetMotionScriptsWhileDisabled(true) end
+            row.link = ns.CreateButton(row, L["Wowhead"], 78, function()
+                local item = row.item
+                local kind = item and WOWHEAD_KIND[item.kind]
+                if kind then ns.ShowCopy(ns.WowheadURL(kind, item.value), L["Wowhead link"]) end
+            end)
+            row.link:SetHeight(20)
+            row.link:SetPoint("RIGHT", row.open, "LEFT", -2, 0)
+            row.link.tooltipTitle = L["Copy Wowhead link"]
         end
-        row.open = ns.CreateButton(row, "", 58, function()
-            if row.item then ns.OpenRef(row.item) end
-        end)
-        row.open:SetHeight(20)
-        row.open:SetPoint("RIGHT", right, 0)
-        -- A disabled button still explains itself on hover.
-        if row.open.SetMotionScriptsWhileDisabled then row.open:SetMotionScriptsWhileDisabled(true) end
-        row.link = ns.CreateButton(row, L["Wowhead"], 78, function()
-            local item = row.item
-            local kind = item and WOWHEAD_KIND[item.kind]
-            if kind then ns.ShowCopy(ns.WowheadURL(kind, item.ref.id), L["Wowhead link"]) end
-        end)
-        row.link:SetHeight(20)
-        row.link:SetPoint("RIGHT", row.open, "LEFT", -2, 0)
-        row.link.tooltipTitle = L["Copy Wowhead link"]
+
         row.text = ns.Text(row, "normal")
         row.text:SetPoint("LEFT", 6, 0)
-        row.text:SetPoint("RIGHT", row.link, "LEFT", -8, 0)
+        row.text:SetPoint("RIGHT", row.remove or row.link, "LEFT", -8, 0)
         row.text:SetWordWrap(false)
-        row:SetScript("OnDoubleClick", function(self)
-            if self.item then ns.OpenRef(self.item) end
-        end)
     end, function(row, item)
-        local hasLink = WOWHEAD_KIND[item.kind] ~= nil
-        row.link:SetShown(hasLink)
-        -- Without the Wowhead button the text runs up to the open button.
-        row.text:SetPoint("RIGHT", hasLink and row.link or row.open, "LEFT", -8, 0)
-        -- Rows are reused: only a quest or a recipe that cannot be opened turns the button off, below.
-        row.open:SetEnabled(true)
-        if item.kind == "item" then
-            local label, plain = ns.ItemRefLabel(item.ref)
-            local count = ns.BagCount(item.ref.id)
-            if count and count > 0 then label = label .. "  |cffffffffx" .. count .. "|r" end
-            row.text:SetText("|cffc8a2ff" .. L["Item"] .. "|r  " .. label)
-            row.open:SetText(L["View"])
-            row.open.tooltipTitle = L["View item: %s"]:format(plain)
-            row.open.tooltipText = L["Pins the item tooltip on screen."]
-        elseif item.kind == "note" then
-            local label, plain = ns.NoteRefLabel(item.ref)
-            local note = ns.GetNote(item.ref.id)
-            local excerpt = note and ns.Trim((note.text or ""):gsub("%s+", " ")) or ""
-            if excerpt ~= "" then label = label .. "  |cff9e9e9e" .. excerpt .. "|r" end
-            row.text:SetText("|cff7fd77f" .. L["Note"] .. "|r  " .. label)
-            row.open:SetText(L["Open"])
-            row.open.tooltipTitle = L["Open note: %s"]:format(plain)
-            row.open.tooltipText = L["Shows the note in the Item Notes window."]
-        elseif item.kind == "quest" then
-            local label = ns.QuestLabel(item.ref)
-            row.text:SetText("|cffffe066" .. L["Quest"] .. "|r  " .. label)
-            row.open:SetText(L["Open"])
-            -- Only a quest in the quest log has a page to open.
-            local status, logIndex = ns.QuestStatus(item.ref.id)
-            row.open:SetEnabled(logIndex ~= nil)
-            row.open.tooltipTitle = logIndex and L["Open quest: %s"]:format(label)
-                or L["This quest is not in your quest log"]
-            row.open.tooltipText = L["Quest ID %d - %s"]:format(item.ref.id, status)
-        elseif item.kind == "recipe" then
-            local label = ns.RecipeLabel(item.ref)
-            row.text:SetText("|cffff9d5c" .. L["Recipe"] .. "|r  " .. label)
-            row.open:SetText(L["Open"])
-            -- Only a character with the recipe's profession has a crafting window to open it in.
-            local canOpen = ns.CanOpenRecipe(item.ref.id)
-            row.open:SetEnabled(canOpen)
-            row.open.tooltipTitle = canOpen and L["Open recipe: %s"]:format(label)
-                or L["This character does not have the profession for this recipe"]
-            row.open.tooltipText = canOpen and L["Opens the crafting window at this recipe."] or nil
-        else
-            local label = ns.PinLabel(item.ref)
-            row.text:SetText("|cff66b8ff" .. L["Map"] .. "|r  " .. label)
-            row.open:SetText(L["Show"])
-            row.open.tooltipTitle = L["Show on map: %s"]:format(label)
-            row.open.tooltipText = L["Opens the world map there and sets a waypoint."]
+        local text, plain = RefText(item)
+        row.text:SetText(text)
+        if row.open then
+            local hasLink = WOWHEAD_KIND[item.kind] ~= nil
+            row.link:SetShown(hasLink)
+            -- Without the Wowhead button the text runs up to the open button.
+            row.text:SetPoint("RIGHT", hasLink and row.link or row.open, "LEFT", -8, 0)
+            UpdateOpenButton(row.open, item, plain)
         end
     end)
 end

@@ -10,8 +10,11 @@ BINDING_HEADER_ITEMNOTES = ns.title
 BINDING_NAME_ITEMNOTES_EDIT = L["Add / edit note for hovered item"]
 BINDING_NAME_ITEMNOTES_TOGGLE = L["Open Item Notes window"]
 
-local DB_VERSION = 1
 local MAX_ID = 2147483647
+
+-- Game API that moved between client versions, looked up once.
+local GetItemInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+local GetItemInfoInstant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -51,40 +54,49 @@ function ns.InCombat()
     return InCombatLockdown ~= nil and InCombatLockdown()
 end
 
+-- Only the first argument is passed on: callers hand over gsub results, which carry a count.
 function ns.Trim(text)
-    return (text or ""):match("^%s*(.-)%s*$")
+    return strtrim(text or "")
 end
 
 function ns.FormatTime(timestamp)
     return timestamp and date("%Y-%m-%d %H:%M", timestamp) or ""
 end
 
--- Returns name, link, quality, icon. Any of them may be nil until the client has cached the item.
+-- Rounds a map coordinate (a fraction of the map's size) to what is worth storing: about a yard.
+local function RoundCoord(value)
+    return math.floor(value * 10000 + 0.5) / 10000
+end
+
+-- Returns name, link, quality, icon straight from the client. Any of them may be nil until the client has
+-- the item's data; asking makes it request that data from the server.
 function ns.ItemInfo(itemID)
-    local getInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
     local name, link, quality, icon
-    if getInfo then
-        local n, l, q, _, _, _, _, _, _, i = getInfo(itemID)
+    if GetItemInfo then
+        local n, l, q, _, _, _, _, _, _, i = GetItemInfo(itemID)
         name, link, quality, icon = n, l, q, i
     end
-    if not icon then
-        local instant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
-        if instant then icon = select(5, instant(itemID)) end
-    end
+    if not icon and GetItemInfoInstant then icon = select(5, GetItemInfoInstant(itemID)) end
     return name, link, quality, icon
 end
 
 -- Whether the client knows an item with this ID. Answers from the local item database, without a server request.
 function ns.ItemExists(itemID)
     if not IsID(itemID) then return false end
-    local instant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
-    if not instant then return true end
-    return instant(itemID) ~= nil
+    if not GetItemInfoInstant then return true end
+    return GetItemInfoInstant(itemID) ~= nil
 end
 
--- The item's name, or a placeholder while it is not known.
-function ns.ItemName(itemID, name)
-    return name or L["Item #%d"]:format(itemID)
+-- The item's icon, from the local item database.
+function ns.ItemIcon(itemID)
+    local icon = GetItemInfoInstant and select(5, GetItemInfoInstant(itemID))
+    return icon or ns.FALLBACK_ICON
+end
+
+-- Returns the item's name, or a placeholder while it is not known, and its quality when that is known.
+function ns.ItemName(itemID)
+    local name, quality = ns.ItemDisplay(itemID)
+    return name or L["Item #%d"]:format(itemID), quality
 end
 
 function ns.MapName(mapID)
@@ -96,19 +108,18 @@ function ns.CaptureLocation()
     local zone = GetRealZoneText and GetRealZoneText() or nil
     local subzone = GetSubZoneText and GetSubZoneText() or nil
     local loc = {
-        zone = PublicString(zone) and zone or "",
-        subzone = PublicString(subzone) and subzone or "",
+        zone = PublicString(zone) and zone ~= "" and zone or nil,
+        subzone = PublicString(subzone) and subzone ~= "" and subzone or nil,
     }
     local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
-    if PublicNumber(mapID) then
+    if IsID(mapID) then
         loc.mapID = mapID
         -- Position is unavailable inside instances.
         local pos = C_Map.GetPlayerMapPosition and C_Map.GetPlayerMapPosition(mapID, "player")
         if pos and not IsSecret(pos) then
             local x, y = pos:GetXY()
             if PublicNumber(x) and PublicNumber(y) then
-                loc.x = math.floor(x * 10000 + 0.5) / 10000
-                loc.y = math.floor(y * 10000 + 0.5) / 10000
+                loc.x, loc.y = RoundCoord(x), RoundCoord(y)
             end
         end
     end
@@ -148,26 +159,10 @@ function ns.WowheadURL(kind, id)
 end
 
 -- Returns the item's name in its quality colour, and the plain name.
-local function ColoredName(itemID, name, quality)
-    local plain = ns.ItemName(itemID, name)
+function ns.ColoredItemName(itemID)
+    local plain, quality = ns.ItemName(itemID)
     local color = quality and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality]
     return ((color and color.hex) or "|cffffffff") .. plain .. "|r", plain
-end
-
--- Returns a quality-coloured name and the plain name for an item reference.
-function ns.ItemRefLabel(ref)
-    local name, _, quality = ns.ItemInfo(ref.id)
-    if name then ref.name = name end
-    if quality then ref.quality = quality end
-    return ColoredName(ref.id, ref.name, ref.quality)
-end
-
--- Returns a quality-coloured name and the plain name for a reference to another item's note.
--- The name comes from the referenced note, which keeps it cached.
-function ns.NoteRefLabel(ref)
-    local note = ns.GetNote(ref.id)
-    local name, _, quality = ns.ItemInfo(ref.id)
-    return ColoredName(ref.id, name or (note and note.name), quality or (note and note.quality))
 end
 
 -- Inserts a link into the chat box that is currently open. Returns false when there is none.
@@ -244,8 +239,7 @@ end
 -- Opens the bags and filters them to the item, the same as typing its name into the bag search box: every
 -- other item is dimmed. The filter stays until the search box is cleared or the bags are closed.
 function ns.LocateItem(itemID)
-    local note = ns.GetNote(itemID)
-    local name = ns.ItemInfo(itemID) or (note and note.name)
+    local name = ns.ItemDisplay(itemID)
     if not name then
         ns.Print(L["Item data is still loading. Try again in a moment."])
         return
@@ -273,7 +267,7 @@ function ns.LocateItem(itemID)
 end
 
 function ns.PinLabel(pin)
-    local name = pin.name or ns.MapName(pin.mapID) or L["Map %s"]:format(tostring(pin.mapID))
+    local name = ns.MapName(pin.mapID) or L["Map %s"]:format(tostring(pin.mapID))
     return string.format("%s (%.1f, %.1f)", name, pin.x * 100, pin.y * 100)
 end
 
@@ -293,8 +287,19 @@ function ns.QuestTitle(questID)
     return PublicString(title) and title ~= "" and title or nil
 end
 
-function ns.QuestLabel(quest)
-    return quest.title or L["Quest #%d"]:format(quest.id)
+-- The quest's title, or nil when it was never seen. The client only knows the title of a quest that is at
+-- hand, so a title is remembered once seen, and the client is only asked for one that is not.
+local function KnownQuestTitle(questID)
+    local title = ns.CachedName("quests", questID)
+    if not title then
+        title = ns.QuestTitle(questID)
+        ns.Remember("quests", questID, title)
+    end
+    return title
+end
+
+function ns.QuestLabel(questID)
+    return KnownQuestTitle(questID) or L["Quest #%d"]:format(questID)
 end
 
 -- Returns a description of the quest's state and, when it is in the quest log, its log index.
@@ -325,14 +330,14 @@ local function ShowQuestInLog(questID, index)
     return false
 end
 
-function ns.OpenQuest(quest)
-    local status, index = ns.QuestStatus(quest.id)
+function ns.OpenQuest(questID)
+    local status, index = ns.QuestStatus(questID)
     if index then
         local shown = false
-        ns.Try(function() shown = ShowQuestInLog(quest.id, index) end)
+        ns.Try(function() shown = ShowQuestInLog(questID, index) end)
         if shown then return end
     end
-    ns.Print(L["%s (quest %d) is %s."]:format(quest.title or L["Quest"], quest.id, status))
+    ns.Print(L["%s (quest %d) is %s."]:format(KnownQuestTitle(questID) or L["Quest"], questID, status))
 end
 
 -- ---------------------------------------------------------------------------
@@ -350,8 +355,14 @@ function ns.RecipeName(recipeID)
     return PublicString(name) and name ~= "" and name or nil
 end
 
-function ns.RecipeLabel(recipe)
-    return recipe.name or L["Recipe #%d"]:format(recipe.id)
+-- Like a quest's title, a recipe's name is remembered once seen.
+function ns.RecipeLabel(recipeID)
+    local name = ns.CachedName("recipes", recipeID)
+    if not name then
+        name = ns.RecipeName(recipeID)
+        ns.Remember("recipes", recipeID, name)
+    end
+    return name or L["Recipe #%d"]:format(recipeID)
 end
 
 -- Whether the crafting window can show the recipe: only for a character that has the recipe's profession.
@@ -362,10 +373,10 @@ function ns.CanOpenRecipe(recipeID)
 end
 
 -- Opens the crafting window at the recipe.
-function ns.OpenRecipe(recipe)
-    if ns.CanOpenRecipe(recipe.id) and ns.Try(function() C_TradeSkillUI.OpenRecipe(recipe.id) end) then return end
+function ns.OpenRecipe(recipeID)
+    if ns.CanOpenRecipe(recipeID) and ns.Try(function() C_TradeSkillUI.OpenRecipe(recipeID) end) then return end
     ns.Print(L["%s (recipe %d) needs a profession this character does not have."]
-        :format(ns.RecipeLabel(recipe), recipe.id))
+        :format(ns.RecipeLabel(recipeID), recipeID))
 end
 
 -- ---------------------------------------------------------------------------
@@ -473,16 +484,18 @@ local function QuestieQuests(itemID)
     return quests, Title
 end
 
--- Returns the quests an item belongs to, as quest references ready to attach to a note. The game cannot look
--- up quests by item, so this gathers what is known: the quest tied to the item in the bags, quests in the
--- quest log that use or collect it, and Questie's database when that addon is loaded. A quest that is not in
--- the log can only come from Questie, and is only offered for a quest item none of whose quests is in the log.
+-- Returns the IDs of the quests an item belongs to, ready to attach to a note. The game cannot look up quests
+-- by item, so this gathers what is known: the quest tied to the item in the bags, quests in the quest log
+-- that use or collect it, and Questie's database when that addon is loaded. A quest that is not in the log
+-- can only come from Questie, and is only offered for a quest item none of whose quests is in the log.
 function ns.QuestsForItem(itemID)
     local found, seen = {}, {}
     local function Add(questID, title)
         if not IsID(questID) or seen[questID] then return end
         seen[questID] = true
-        found[#found + 1] = { id = questID, title = ns.QuestTitle(questID) or title }
+        found[#found + 1] = questID
+        -- The title is only at hand now, so it is remembered now.
+        ns.Remember("quests", questID, ns.QuestTitle(questID) or title)
     end
 
     ns.Try(function() Add(BagItemQuest(itemID)) end)
@@ -498,8 +511,7 @@ function ns.QuestsForItem(itemID)
         if select(2, ns.QuestStatus(questID)) then Add(questID, Title(questID)) end
     end
     if #found == 0 then
-        local instant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
-        if instant and select(6, instant(itemID)) == QUEST_ITEM_CLASS then
+        if GetItemInfoInstant and select(6, GetItemInfoInstant(itemID)) == QUEST_ITEM_CLASS then
             for index = 1, math.min(#known, MAX_DATABASE_QUESTS) do
                 Add(known[index], Title(known[index]))
             end
@@ -537,7 +549,7 @@ end
 function ns.OpenPin(pin)
     local label = ns.PinLabel(pin)
     -- TomTom takes the waypoint when it is installed; otherwise it goes to the Blizzard map pin.
-    if not AddTomTomWaypoint(pin, pin.title or label) then SetUserWaypoint(pin) end
+    if not AddTomTomWaypoint(pin, label) then SetUserWaypoint(pin) end
     local opened = ns.Try(function()
         if OpenWorldMap then
             OpenWorldMap(pin.mapID)
@@ -555,209 +567,20 @@ function ns.GetUserWaypointPin()
     local point = C_Map.GetUserWaypoint()
     if not point or not point.position then return nil end
     local x, y = point.position:GetXY()
-    if not (PublicNumber(point.uiMapID) and PublicNumber(x) and PublicNumber(y)) then return nil end
-    return { mapID = point.uiMapID, x = x, y = y, name = ns.MapName(point.uiMapID) }
+    if not (IsID(point.uiMapID) and PublicNumber(x) and PublicNumber(y)) then return nil end
+    return { mapID = point.uiMapID, x = RoundCoord(x), y = RoundCoord(y) }
+end
+
+-- Returns a pin for where the player stands, or nil where the game gives no position (inside instances).
+function ns.GetPlayerPin()
+    local loc = ns.CaptureLocation()
+    if not (loc.mapID and loc.x) then return nil end
+    return { mapID = loc.mapID, x = loc.x, y = loc.y }
 end
 
 -- ---------------------------------------------------------------------------
--- Database
+-- Deleting a note
 -- ---------------------------------------------------------------------------
-
-local listeners = {}
-
-function ns.OnChanged(callback)
-    listeners[#listeners + 1] = callback
-end
-
-local function FireChanged()
-    for _, callback in ipairs(listeners) do callback() end
-end
-
-local function StringOrNil(value)
-    return type(value) == "string" and value or nil
-end
-
-local function NumberOrNil(value)
-    return type(value) == "number" and value or nil
-end
-
--- Returns list itself when every entry passes validate, otherwise a copy without the bad entries.
-local function CleanList(list, validate)
-    if type(list) ~= "table" then return {} end
-    local clean
-    for index, entry in ipairs(list) do
-        local valid = type(entry) == "table" and validate(entry)
-        if clean then
-            if valid then clean[#clean + 1] = entry end
-        elseif not valid then
-            clean = {}
-            for kept = 1, index - 1 do clean[kept] = list[kept] end
-        end
-    end
-    return clean or list
-end
-
-local function ValidQuestRef(quest)
-    quest.title = StringOrNil(quest.title)
-    return IsID(quest.id)
-end
-
-local function ValidRecipeRef(recipe)
-    recipe.name = StringOrNil(recipe.name)
-    return IsID(recipe.id)
-end
-
-local function ValidPinRef(pin)
-    pin.name, pin.title = StringOrNil(pin.name), StringOrNil(pin.title)
-    return type(pin.mapID) == "number" and type(pin.x) == "number" and type(pin.y) == "number"
-end
-
-local function ValidItemRef(item)
-    item.name, item.quality = StringOrNil(item.name), NumberOrNil(item.quality)
-    return IsID(item.id)
-end
-
--- A reference to another item's note: just that item's ID.
-local function ValidNoteRef(ref)
-    return IsID(ref.id)
-end
-
-local function HasNoteRef(refs, itemID)
-    for _, ref in ipairs(refs) do
-        if ref.id == itemID then return true end
-    end
-    return false
-end
-
-local function RemoveNoteRef(refs, itemID)
-    for index = #refs, 1, -1 do
-        if refs[index].id == itemID then table.remove(refs, index) end
-    end
-end
-
--- Drops the note's references to itself and to notes that do not exist, and any repeated reference.
-local function CleanNoteRefs(db, itemID, note)
-    local refs, seen = note.notes, {}
-    for index = #refs, 1, -1 do
-        local target = refs[index].id
-        if target == itemID or seen[target] or not db.notes[target] then
-            table.remove(refs, index)
-        else
-            seen[target] = true
-        end
-    end
-end
-
--- References between notes go both ways. Makes every note that this one lists point back at it, and with
--- exclusive set, removes the reference to it from every note it does not list.
-local function MirrorNoteRefs(db, itemID, note, exclusive)
-    local linked = {}
-    for _, ref in ipairs(note.notes) do linked[ref.id] = true end
-    for otherID, other in pairs(db.notes) do
-        if otherID ~= itemID then
-            if linked[otherID] then
-                if not HasNoteRef(other.notes, itemID) then other.notes[#other.notes + 1] = { id = itemID } end
-            elseif exclusive then
-                RemoveNoteRef(other.notes, itemID)
-            end
-        end
-    end
-end
-
--- Makes sure every stored note has the shape the UI expects, so a damaged or hand-edited saved-variables file
--- cannot cause errors later. Entries that are not notes at all are moved to db.invalid rather than deleted.
-local function SanitizeNotes(db)
-    local invalid
-    for itemID, note in pairs(db.notes) do
-        if IsID(itemID) and type(note) == "table" then
-            note.text = type(note.text) == "string" and note.text or ""
-            note.created, note.updated = NumberOrNil(note.created), NumberOrNil(note.updated)
-            note.char, note.name = StringOrNil(note.char), StringOrNil(note.name)
-            note.quality = NumberOrNil(note.quality)
-            if type(note.icon) ~= "number" and type(note.icon) ~= "string" then note.icon = nil end
-            if type(note.loc) ~= "table" then
-                note.loc = nil
-            else
-                local loc = note.loc
-                loc.zone, loc.subzone = StringOrNil(loc.zone), StringOrNil(loc.subzone)
-                loc.mapID, loc.x, loc.y = NumberOrNil(loc.mapID), NumberOrNil(loc.x), NumberOrNil(loc.y)
-            end
-            note.quests = CleanList(note.quests, ValidQuestRef)
-            note.recipes = CleanList(note.recipes, ValidRecipeRef)
-            note.pins = CleanList(note.pins, ValidPinRef)
-            note.items = CleanList(note.items, ValidItemRef)
-            note.notes = CleanList(note.notes, ValidNoteRef)
-        else
-            invalid = invalid or {}
-            invalid[#invalid + 1] = itemID
-        end
-    end
-    if invalid then
-        if type(db.invalid) ~= "table" then db.invalid = {} end
-        for _, key in ipairs(invalid) do
-            db.invalid[tostring(key)] = db.notes[key]
-            db.notes[key] = nil
-        end
-    end
-    -- Only once every note is known to be valid can references between them be checked.
-    for itemID, note in pairs(db.notes) do
-        CleanNoteRefs(db, itemID, note)
-    end
-    -- A reference stored on one side only (older data, or a hand-edited file) gains its other side.
-    for itemID, note in pairs(db.notes) do
-        MirrorNoteRefs(db, itemID, note, false)
-    end
-end
-
-function ns.GetNote(itemID)
-    return ns.db and ns.db.notes[itemID]
-end
-
-function ns.CacheItemInfo(itemID, note)
-    local name, link, quality, icon = ns.ItemInfo(itemID)
-    if name then note.name = name end
-    if quality then note.quality = quality end
-    if icon then note.icon = icon end
-    return note.name, link, note.quality, note.icon
-end
-
--- Creates or updates a note. Location, character and creation time are recorded once, when the note is created.
--- notes lists references to other items' notes, as { id = itemID } entries. Those go both ways: each note
--- listed gains a reference back to this one, and a note no longer listed loses its reference to this one.
-function ns.SaveNote(itemID, text, quests, pins, items, notes, recipes)
-    local note = ns.db.notes[itemID]
-    local now = time()
-    if not note then
-        note = {
-            created = now,
-            loc = ns.CaptureLocation(),
-            char = (UnitName("player") or "?") .. " - " .. (GetRealmName() or "?"),
-        }
-        ns.db.notes[itemID] = note
-    end
-    note.text = text or ""
-    note.updated = now
-    note.quests = quests or note.quests or {}
-    note.pins = pins or note.pins or {}
-    note.items = items or note.items or {}
-    note.notes = notes or note.notes or {}
-    note.recipes = recipes or note.recipes or {}
-    CleanNoteRefs(ns.db, itemID, note)
-    MirrorNoteRefs(ns.db, itemID, note, true)
-    ns.CacheItemInfo(itemID, note)
-    FireChanged()
-    return note
-end
-
--- Deletes a note, and with it every reference other notes hold to it.
-function ns.DeleteNote(itemID)
-    if not ns.db.notes[itemID] then return end
-    ns.db.notes[itemID] = nil
-    for _, note in pairs(ns.db.notes) do
-        RemoveNoteRef(note.notes, itemID)
-    end
-    FireChanged()
-end
 
 StaticPopupDialogs["ITEMNOTES_DELETE"] = {
     text = L["Delete the note for %s?"],
@@ -771,9 +594,8 @@ StaticPopupDialogs["ITEMNOTES_DELETE"] = {
 }
 
 function ns.ConfirmDelete(itemID)
-    local note = ns.GetNote(itemID)
-    if not note then return end
-    StaticPopup_Show("ITEMNOTES_DELETE", ns.ItemName(itemID, note.name), nil, itemID)
+    if not ns.GetNote(itemID) then return end
+    StaticPopup_Show("ITEMNOTES_DELETE", (ns.ItemName(itemID)), nil, itemID)
 end
 
 -- ---------------------------------------------------------------------------
@@ -845,8 +667,15 @@ end
 -- Entry points
 -- ---------------------------------------------------------------------------
 
+-- Whether the saved notes are loaded. When they could not be, says why: the addon is off for the session.
+local function Ready()
+    if ns.db then return true end
+    if ns.dbProblem then ns.Print(ns.dbProblem) end
+    return false
+end
+
 function ItemNotes_EditHovered()
-    if not ns.db then return end
+    if not Ready() then return end
     local itemID = ns.HoveredItem()
     if not itemID then
         ns.Print(L["Hover over an item first, then press the keybind."])
@@ -856,7 +685,7 @@ function ItemNotes_EditHovered()
 end
 
 function ItemNotes_Toggle()
-    if ns.db then ns.ToggleBrowser() end
+    if Ready() then ns.ToggleBrowser() end
 end
 
 function ItemNotes_OnAddonCompartmentClick(_, button)
@@ -884,6 +713,7 @@ SlashCmdList.ITEMNOTES = function(message)
         return
     end
     local itemID = tonumber(idText)
+    if not Ready() then return end
     if ns.ItemExists(itemID) then
         ns.OpenEditor(itemID)
     else
@@ -893,6 +723,7 @@ end
 
 local events = CreateFrame("Frame")
 events:RegisterEvent("ADDON_LOADED")
+events:RegisterEvent("PLAYER_LOGIN")
 events:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 -- Fires once after a batch of bag changes. Clients without it get the per-bag event instead.
 if not pcall(events.RegisterEvent, events, "BAG_UPDATE_DELAYED") then events:RegisterEvent("BAG_UPDATE") end
@@ -906,27 +737,21 @@ events:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" then
         if arg1 ~= addonName then return end
         self:UnregisterEvent("ADDON_LOADED")
-        if type(ItemNotesDB) ~= "table" then ItemNotesDB = {} end
-        local db = ItemNotesDB
-        if type(db.notes) ~= "table" then db.notes = {} end
-        SanitizeNotes(db)
-        -- Never held anything; dropped from the schema.
-        db.settings = nil
-        db.version = DB_VERSION
-        ns.db = db
-    elseif event == "GET_ITEM_INFO_RECEIVED" and ns.db and PublicNumber(arg1) then
-        -- Item data arrived from the server: fill in the cached name/icon for notes that lacked it.
-        local note = ns.db.notes[arg1]
-        if note and not note.name then
-            ns.CacheItemInfo(arg1, note)
-            if note.name then FireChanged() end
-        end
+        ns.LoadDatabase()
+    elseif event == "PLAYER_LOGIN" then
+        -- The chat frame is ready by now. The same is said again whenever the addon is asked to do something.
+        if ns.dbProblem then ns.Print(ns.dbProblem) end
+    elseif not ns.db then
+        return
+    elseif event == "GET_ITEM_INFO_RECEIVED" then
+        -- Item data arrived from the server: a name that was missing may be known now.
+        if PublicNumber(arg1) then ns.ItemInfoReceived(arg1) end
     elseif event == "BAG_UPDATE_DELAYED" or event == "BAG_UPDATE" then
-        -- The open windows show bag counts, so they refresh as if a note had changed.
+        -- The open windows show bag counts.
         bagCounts, bagOfItem, slotOfItem = nil, nil, nil
-        if ns.db then FireChanged() end
+        ns.QueueChanged("state")
     elseif OPENABLE_EVENTS[event] then
         -- Reference lists show whether a quest or a recipe can be opened.
-        if ns.db then FireChanged() end
+        ns.QueueChanged("state")
     end
 end)

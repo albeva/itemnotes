@@ -13,27 +13,37 @@ local SEARCH_DELAY = 0.15
 -- The list row under the mouse, if any.
 local hoveredRow
 
--- Items whose data was already requested from the server this session, so a refresh does not ask again.
-local requested = {}
+-- Everything the search box looks through for a note, as one lower-case string. Built the first time a note
+-- is searched and kept until notes change, so typing a search does not rebuild it for every key pressed.
+-- Keyed by the note itself and weak, so a deleted note's text goes with it.
+local searchText = setmetatable({}, { __mode = "k" })
 
-local function Matches(entry, filter)
-    if filter == "" then return true end
+-- Which cached names a kind of reference is found under. A note is named by its item.
+local NAME_KIND = { item = "items", note = "items", quest = "quests", recipe = "recipes" }
+
+local function SearchText(entry)
     local note = entry.note
-    local haystack = { entry.name, note.text or "", ns.LocationText(note.loc), note.char or "", tostring(entry.id) }
-    for _, quest in ipairs(note.quests) do haystack[#haystack + 1] = quest.title or "" end
-    for _, recipe in ipairs(note.recipes) do haystack[#haystack + 1] = recipe.name or "" end
-    for _, pin in ipairs(note.pins) do haystack[#haystack + 1] = ns.PinLabel(pin) end
-    for _, item in ipairs(note.items) do haystack[#haystack + 1] = item.name or "" end
-    for _, ref in ipairs(note.notes) do
-        local target = ns.GetNote(ref.id)
-        haystack[#haystack + 1] = target and target.name or ""
+    local text = searchText[note]
+    if not text then
+        local parts = { entry.name, note.text, ns.LocationText(note.loc), note.char or "", tostring(entry.id) }
+        if note.refs then
+            for _, ref in ipairs(note.refs) do
+                local kind, id, x, y = ns.ParseRef(ref)
+                if kind == "pin" then
+                    parts[#parts + 1] = ns.PinLabel({ mapID = id, x = x, y = y })
+                else
+                    parts[#parts + 1] = ns.CachedName(NAME_KIND[kind], id)
+                end
+            end
+        end
+        text = table.concat(parts, "\n"):lower()
+        searchText[note] = text
     end
-    return table.concat(haystack, "\n"):lower():find(filter, 1, true) ~= nil
+    return text
 end
 
 local function CompareEntries(a, b)
-    if sortMode == "name" and a.name ~= b.name then return a.name < b.name end
-    if sortMode == "zone" and a.zone ~= b.zone then return a.zone < b.zone end
+    if a.key ~= b.key then return a.key < b.key end
     local ta, tb = a.note.updated or 0, b.note.updated or 0
     if ta ~= tb then return ta > tb end
     return a.id < b.id
@@ -42,18 +52,21 @@ end
 -- Returns the notes matching the search box, sorted, and the total number of notes.
 local function BuildEntries()
     local filter = ns.Trim(browser.search:GetText()):lower()
-    local byZone = sortMode == "zone"
     local entries, total = {}, 0
     for itemID, note in pairs(ns.db.notes) do
         total = total + 1
-        if not note.name and not requested[itemID] then
-            requested[itemID] = true
-            ns.CacheItemInfo(itemID, note)
-        end
-        local entry = { id = itemID, note = note, name = ns.ItemName(itemID, note.name) }
-        if Matches(entry, filter) then
-            -- The sort key is built once per entry, not once per comparison.
-            if byZone then entry.zone = ns.LocationText(note.loc) end
+        local name, quality = ns.ItemName(itemID)
+        local entry = { id = itemID, note = note, name = name, quality = quality }
+        if filter == "" or SearchText(entry):find(filter, 1, true) then
+            -- The sort key is built once per entry, not once per comparison. Sorting by time has none: every
+            -- order ends with newest first.
+            if sortMode == "name" then
+                entry.key = name:lower()
+            elseif sortMode == "zone" then
+                entry.key = ns.LocationText(note.loc):lower()
+            else
+                entry.key = ""
+            end
             entries[#entries + 1] = entry
         end
     end
@@ -75,14 +88,15 @@ local function RefreshDetail()
         return
     end
 
-    detail.icon.texture:SetTexture(note.icon or select(4, ns.ItemInfo(selectedID)) or ns.FALLBACK_ICON)
+    local name, quality = ns.ItemName(selectedID)
+    detail.icon.texture:SetTexture(ns.ItemIcon(selectedID))
     ns.SetIconCount(detail.icon, selectedID)
     detail.locate:UpdateForItem()
-    detail.name:SetText(ns.ItemName(selectedID, note.name))
-    detail.name:SetTextColor(ns.QualityColor(note.quality))
+    detail.name:SetText(name)
+    detail.name:SetTextColor(ns.QualityColor(quality))
     detail.meta:SetText(L["Item ID %d"]:format(selectedID))
 
-    local text = note.text or ""
+    local text = note.text
     detail.noteText:SetText(text ~= "" and text or ("|cff8f949f" .. L["(no text)"] .. "|r"))
     detail.FitNote()
     -- Back to the top only when a different note is shown, not on every refresh of the same one.
@@ -91,7 +105,7 @@ local function RefreshDetail()
         detail.noteScroll:ScrollTo(0)
     end
 
-    local refs = ns.RefItems(note.quests, note.pins, note.items, note.notes, note.recipes)
+    local refs = ns.RefItems(note.refs)
     detail.refs:SetItems(refs)
     -- A note without references shows no references section at all.
     detail.refLabel:SetShown(#refs > 0)
@@ -191,9 +205,15 @@ end
 -- List (left side)
 -- ---------------------------------------------------------------------------
 
+-- Whether there is a window on screen to refresh. browser.detail is created last, so this is also false while
+-- the window is being built.
+local function IsOpen()
+    return browser ~= nil and browser.detail ~= nil and browser:IsShown()
+end
+
+-- Rebuilds the list from the notes: which ones match the search, and in what order.
 local function Refresh()
-    -- browser.detail is created last, so this also skips refreshes fired while the window is being built.
-    if not browser or not browser.detail or not browser:IsShown() then return end
+    if not IsOpen() then return end
     if selectedID and not ns.GetNote(selectedID) then selectedID = nil end
     local entries, total = BuildEntries()
     browser.entries = entries
@@ -210,6 +230,21 @@ local function Refresh()
         browser.count:SetText(L["%d of %d"]:format(#entries, total))
     end
     RefreshDetail()
+end
+
+-- Notes changed, or only the game around them. The list is rebuilt for the first; for the second (bag counts,
+-- whether a quest can be opened) the same rows are drawn again.
+local function OnChanged(what)
+    if what == "state" then
+        if IsOpen() then
+            browser.list:Redraw()
+            RefreshDetail()
+        end
+    else
+        -- Stale whether or not the window is open to show it.
+        wipe(searchText)
+        Refresh()
+    end
 end
 
 -- Typing in the search box refreshes once the typing pauses, not on every keystroke.
@@ -308,24 +343,43 @@ local function Plural(count, one, many)
     return (count == 1 and one or many):format(count)
 end
 
+-- The kinds of reference in the order a row sums them up, with the wording for one and for several.
+local REF_SUMMARY = {
+    { "item", L["%d item"], L["%d items"] },
+    { "note", L["%d note"], L["%d notes"] },
+    { "quest", L["%d quest"], L["%d quests"] },
+    { "recipe", L["%d recipe"], L["%d recipes"] },
+    { "pin", L["%d location"], L["%d locations"] },
+}
+-- Scratch tables for RefSummary, which runs for every row drawn.
+local refCounts, refParts = {}, {}
+
+-- Returns a note's references summed up by kind ("2 items, 1 quest"), or nil for a note without any.
+local function RefSummary(refs)
+    if not refs then return nil end
+    wipe(refCounts)
+    for _, ref in ipairs(refs) do
+        local kind = ref:match("^%a+")
+        if kind then refCounts[kind] = (refCounts[kind] or 0) + 1 end
+    end
+    wipe(refParts)
+    for _, spec in ipairs(REF_SUMMARY) do
+        local count = refCounts[spec[1]]
+        if count then refParts[#refParts + 1] = Plural(count, spec[2], spec[3]) end
+    end
+    return refParts[1] and table.concat(refParts, ", ") or nil
+end
+
 local function UpdateRow(row, entry)
     local note = entry.note
-    row.icon.texture:SetTexture(note.icon or select(4, ns.ItemInfo(entry.id)) or ns.FALLBACK_ICON)
+    row.icon.texture:SetTexture(ns.ItemIcon(entry.id))
     ns.SetIconCount(row.icon, entry.id)
     row.name:SetText(entry.name)
-    row.name:SetTextColor(ns.QualityColor(note.quality))
+    row.name:SetTextColor(ns.QualityColor(entry.quality))
 
-    local text = (note.text or ""):gsub("%s+", " ")
-    local items, notes, quests, recipes, pins = #note.items, #note.notes, #note.quests, #note.recipes, #note.pins
-    if items + notes + quests + recipes + pins > 0 then
-        local refs = {}
-        if items > 0 then refs[#refs + 1] = Plural(items, L["%d item"], L["%d items"]) end
-        if notes > 0 then refs[#refs + 1] = Plural(notes, L["%d note"], L["%d notes"]) end
-        if quests > 0 then refs[#refs + 1] = Plural(quests, L["%d quest"], L["%d quests"]) end
-        if recipes > 0 then refs[#refs + 1] = Plural(recipes, L["%d recipe"], L["%d recipes"]) end
-        if pins > 0 then refs[#refs + 1] = Plural(pins, L["%d location"], L["%d locations"]) end
-        text = "|cff66b8ff" .. table.concat(refs, ", ") .. "|r  " .. text
-    end
+    local text = note.text:gsub("%s+", " ")
+    local summary = RefSummary(note.refs)
+    if summary then text = "|cff66b8ff" .. summary .. "|r  " .. text end
     row.text:SetText(text)
     row.when:SetText(date("%Y-%m-%d", note.updated or note.created or 0))
 
@@ -342,8 +396,8 @@ local function SaveLayout()
         height = math.floor(browser:GetHeight() + 0.5),
         point = point,
         relativePoint = relativePoint,
-        x = x,
-        y = y,
+        x = x and math.floor(x + 0.5),
+        y = y and math.floor(y + 0.5),
     }
 end
 
@@ -439,7 +493,7 @@ local function CreateBrowser()
         Refresh()
     end)
     browser:SetScript("OnHide", function() browser.search:ClearFocus() end)
-    ns.OnChanged(Refresh)
+    ns.OnChanged(OnChanged)
 end
 
 function ns.ToggleBrowser()

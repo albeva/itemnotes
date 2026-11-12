@@ -21,7 +21,7 @@ globals = {
 -- Game API the addon reads.
 read_globals = {
     -- Lua extensions
-    "date", "time", "geterrorhandler", "issecretvalue",
+    "date", "time", "geterrorhandler", "issecretvalue", "strtrim", "wipe",
 
     -- Namespaces
     "C_Container", "C_Item", "C_Map", "C_QuestLog", "C_Spell", "C_SuperTrack", "C_Timer", "C_TradeSkillUI",
@@ -31,12 +31,12 @@ read_globals = {
     "ChatEdit_InsertLink", "ChatFrame_OpenChat", "ClearCursor", "CreateFrame",
     "GameTooltip_Hide", "GetBindingKey", "GetBindingText", "GetContainerItemID", "GetContainerItemInfo",
     "GetContainerItemQuestInfo", "GetContainerNumSlots",
-    "GetCursorInfo", "GetItemInfo", "GetItemInfoInstant", "GetMouseFoci", "GetMouseFocus",
+    "GetCursorInfo", "GetCursorPosition", "GetItemInfo", "GetItemInfoInstant", "GetMouseFoci", "GetMouseFocus",
     "GetNumQuestLeaderBoards", "GetNumQuestLogEntries", "GetQuestLogIndexByID", "GetQuestLogLeaderBoard",
     "GetQuestLogSpecialItemInfo", "GetQuestLogTitle",
     "GetRealmName", "GetRealZoneText", "GetSubZoneText", "HideUIPanel",
     "InCombatLockdown", "InterfaceOptions_AddCategory", "InterfaceOptionsFrame_OpenToCategory",
-    "IsBagOpen", "IsControlKeyDown", "IsMetaKeyDown", "IsModifiedClick", "IsShiftKeyDown",
+    "IsBagOpen", "IsControlKeyDown", "IsMetaKeyDown", "IsModifiedClick", "IsMouseButtonDown", "IsShiftKeyDown",
     "OpenAllBags", "OpenBag", "OpenWorldMap", "QuestLog_SetSelection", "QuestMapFrame_OpenToQuestDetails",
     "SetItemSearch", "SetPortraitToTexture", "ShowUIPanel", "StaticPopup_Show", "UnitName",
 
