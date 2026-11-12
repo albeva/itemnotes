@@ -36,7 +36,7 @@ local function IsDirty()
 end
 
 -- ---------------------------------------------------------------------------
--- References (items, other notes, quests, recipes, spells, NPCs and map pins) being edited
+-- References (items, other notes, quests, recipes, spells, NPCs, macros and map pins) being edited
 -- ---------------------------------------------------------------------------
 
 -- editor.attached is the list of references being edited, in the form a note stores them (see
@@ -51,6 +51,26 @@ local function RefreshRefs()
     end
     editor.refs:SetItems(ns.RefItems(attached))
 end
+
+-- A reference was replaced in every note, or removed (new is nil): a macro was renamed or deleted. The same
+-- is done to the list being edited and to a waiting draft, or saving them would bring the old reference back.
+local function ReplaceIn(attached, old, new)
+    local index = attached and IndexOf(attached, old)
+    if not index then return end
+    if new and not IndexOf(attached, new) then
+        attached[index] = new
+    else
+        table.remove(attached, index)
+    end
+end
+
+ns.OnRefReplaced(function(old, new)
+    if draft then ReplaceIn(draft.attached, old, new) end
+    if editor then
+        ReplaceIn(editor.attached, old, new)
+        if editor:IsShown() then RefreshRefs() end
+    end
+end)
 
 -- The count on the item's icon follows what is in the bags.
 local function RefreshBagInfo()
@@ -97,7 +117,8 @@ local function AddNPC(npcID, name)
     AddRef(ns.Ref("npc", npcID))
 end
 
--- Attaches the item or the spell currently held on the cursor (dragged from a bag or the spellbook).
+-- Attaches the item, the spell or the macro currently held on the cursor (dragged from a bag, the spellbook
+-- or the macro window).
 local function TakeCursor()
     local kind, id, _, spellID = GetCursorInfo()
     if kind == "item" and type(id) == "number" then
@@ -106,6 +127,13 @@ local function TakeCursor()
     elseif kind == "spell" and ns.IsID(spellID) then
         ClearCursor()
         AddSpell(spellID)
+    elseif kind == "macro" then
+        -- The cursor holds the macro's place in the macro window; the reference is to its name.
+        local name = ns.MacroName(id)
+        if name then
+            ClearCursor()
+            AddRef(ns.Ref("macro", name))
+        end
     end
 end
 
@@ -387,7 +415,7 @@ local function CreateEditor()
     editor.meta = ns.Text(editor, "small", "muted")
     editor.meta:SetPoint("TOPLEFT", editor.name, "BOTTOMLEFT", 0, -4)
 
-    -- Dropping an item or a spell anywhere on the window attaches it as a reference.
+    -- Dropping an item, a spell or a macro anywhere on the window attaches it as a reference.
     editor:SetScript("OnReceiveDrag", TakeCursor)
     editor:SetScript("OnMouseUp", TakeCursor)
 

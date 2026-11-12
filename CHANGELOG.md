@@ -7,6 +7,7 @@
 - Notes can reference crafting recipes. Shift-click a recipe while the editor is open.
 - Notes can reference spells. Shift-click a spell in the spellbook, or drag it onto the editor.
 - Notes can reference NPCs. Shift-click an NPC in the world, or its unit frame, while the editor is open.
+- Notes can reference macros. Drag a macro from the macro window onto the editor. The reference follows a renamed macro and is removed with a deleted one.
 
 ### Changed
 

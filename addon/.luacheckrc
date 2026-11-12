@@ -31,13 +31,14 @@ read_globals = {
     "ChatEdit_InsertLink", "ChatFrame_OpenChat", "ClearCursor", "CreateFrame",
     "GameTooltip_Hide", "GetBindingKey", "GetBindingText", "GetContainerItemID", "GetContainerItemInfo",
     "GetContainerItemQuestInfo", "GetContainerNumSlots",
-    "GetCursorInfo", "GetCursorPosition", "GetItemInfo", "GetItemInfoInstant", "GetMouseFoci", "GetMouseFocus",
+    "GetCursorInfo", "GetCursorPosition", "GetItemInfo", "GetItemInfoInstant", "GetMacroIndexByName", "GetMacroInfo",
+    "GetMouseFoci", "GetMouseFocus", "GetNumMacros",
     "GetNumQuestLeaderBoards", "GetNumQuestLogEntries", "GetQuestLogIndexByID", "GetQuestLogLeaderBoard",
     "GetQuestLogSpecialItemInfo", "GetQuestLogTitle",
     "GetRealmName", "GetRealZoneText", "GetSpellInfo", "GetSubZoneText", "GetUnitName", "HideUIPanel",
     "InCombatLockdown", "InterfaceOptions_AddCategory", "InterfaceOptionsFrame_OpenToCategory",
     "IsBagOpen", "IsControlKeyDown", "IsMetaKeyDown", "IsModifiedClick", "IsMouseButtonDown", "IsShiftKeyDown",
-    "OpenAllBags", "OpenBag", "OpenWorldMap", "QuestLog_SetSelection", "QuestMapFrame_OpenToQuestDetails",
+    "OpenAllBags", "OpenBag", "OpenWorldMap", "PickupMacro", "QuestLog_SetSelection", "QuestMapFrame_OpenToQuestDetails",
     "SetItemSearch", "SetPortraitToTexture", "ShowUIPanel", "StaticPopup_Show", "UnitGUID",
     "UnitName",
 
@@ -48,7 +49,7 @@ read_globals = {
     "StackSplitFrame", "UIParent", "WatchFrame", "WorldFrame", "WorldMapFrame",
 
     -- Constants
-    "ITEM_QUALITY_COLORS", "NO", "NUM_BAG_SLOTS", "NUM_TOTAL_EQUIPPED_BAG_SLOTS", "YES",
+    "ITEM_QUALITY_COLORS", "MAX_ACCOUNT_MACROS", "NO", "NUM_BAG_SLOTS", "NUM_TOTAL_EQUIPPED_BAG_SLOTS", "YES",
 
     -- Other addons
     "QuestieLoader", "TomTom",

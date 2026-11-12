@@ -33,6 +33,9 @@ local function SearchText(entry)
                 local kind, id, x, y = ns.ParseRef(ref)
                 if kind == "pin" then
                     parts[#parts + 1] = ns.PinLabel({ mapID = id, x = x, y = y })
+                elseif kind == "macro" then
+                    -- A macro's reference is its name.
+                    parts[#parts + 1] = id
                 else
                     parts[#parts + 1] = ns.CachedName(NAME_KIND[kind], id)
                 end
@@ -353,6 +356,7 @@ local REF_SUMMARY = {
     { "recipe", L["%d recipe"], L["%d recipes"] },
     { "spell", L["%d spell"], L["%d spells"] },
     { "npc", L["%d NPC"], L["%d NPCs"] },
+    { "macro", L["%d macro"], L["%d macros"] },
     { "pin", L["%d location"], L["%d locations"] },
 }
 -- Scratch tables for RefSummary, which runs for every row drawn.

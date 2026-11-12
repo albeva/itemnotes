@@ -34,6 +34,7 @@ local IsID = ns.IsID
 --   "recipe:<spellID>"   a crafting recipe
 --   "spell:<spellID>"    a spell or ability
 --   "npc:<npcID>"        a named NPC, or a kind of mob: every spawn of a mob shares one ID
+--   "macro:<name>"       a macro, by its name: the game gives a macro no ID that lasts
 --   "pin:<mapID>:<x>:<y>"   a map location; x and y are fractions of the map, to four decimals
 --
 -- A note holds each reference once, and holds no refs list while it has none. A reference between two notes is
@@ -85,7 +86,7 @@ end
 -- References
 -- ---------------------------------------------------------------------------
 
--- The kinds of reference that are an ID. A map pin is the other kind.
+-- The kinds of reference that are an ID. A macro and a map pin are the other kinds.
 local ID_KINDS = { item = true, note = true, quest = true, recipe = true, spell = true, npc = true }
 
 -- A map coordinate, as a fraction of the map's width or height. NaN fails the comparison.
@@ -93,7 +94,8 @@ local function IsCoord(value)
     return type(value) == "number" and value >= 0 and value <= 1
 end
 
--- Returns the reference to anything that is an ID. kind is "item", "note", "quest", "recipe", "spell" or "npc".
+-- Returns the reference to anything that is an ID (kind is "item", "note", "quest", "recipe", "spell" or
+-- "npc"), or to a macro: kind is "macro" and id is its name.
 function ns.Ref(kind, id)
     return kind .. ":" .. id
 end
@@ -103,13 +105,16 @@ function ns.PinRef(pin)
     return ("pin:%d:%.4f:%.4f"):format(pin.mapID, pin.x, pin.y)
 end
 
--- Takes a reference apart. Returns its kind and ID or, for a map pin, "pin", mapID, x, y. A string that is not
--- a reference gives nil, or a kind without usable numbers.
+-- Takes a reference apart. Returns its kind and ID or, for a macro, "macro" and its name or, for a map pin,
+-- "pin", mapID, x, y. A string that is not a reference gives nil, or a kind without usable numbers.
 function ns.ParseRef(ref)
     local kind, rest = ref:match("^(%a+):(.+)$")
     if kind == "pin" then
         local mapID, x, y = rest:match("^(%d+):([%d.]+):([%d.]+)$")
         return kind, tonumber(mapID), tonumber(x), tonumber(y)
+    elseif kind == "macro" then
+        -- The name stays text, even one that is all digits.
+        return kind, rest
     end
     return kind, rest and rest:match("^%d+$") and tonumber(rest) or nil
 end
@@ -121,6 +126,9 @@ local function CleanRef(ref)
     local kind, id, x, y = ns.ParseRef(ref)
     if kind == "pin" then
         if IsID(id) and IsCoord(x) and IsCoord(y) then return ("pin:%d:%.4f:%.4f"):format(id, x, y) end
+    elseif kind == "macro" then
+        -- Any name will do: it only has to be there, and ParseRef gives no kind without one.
+        return ref
     elseif ID_KINDS[kind] and IsID(id) then
         return kind .. ":" .. id
     end
@@ -538,6 +546,41 @@ function ns.SaveNote(itemID, text, refs)
     end
     FireChanged("notes")
     return note
+end
+
+-- Told of every reference ns.ReplaceRef replaces, as (old, new): new is nil for one that was removed.
+local refListeners = {}
+
+function ns.OnRefReplaced(callback)
+    refListeners[#refListeners + 1] = callback
+end
+
+-- Replaces one reference by another in every note, or removes it when there is no other: what follows a macro
+-- that was renamed or deleted. Not for a reference to a note: those go both ways, and SaveNote and DeleteNote
+-- keep them in step. A note left without text or references stays, as one does when a note it referenced is
+-- deleted. Returns how many notes held the reference.
+function ns.ReplaceRef(old, new)
+    local count = 0
+    for _, note in pairs(ns.db.notes) do
+        local list = note.refs
+        -- A note holds a reference once.
+        for index = 1, list and #list or 0 do
+            if list[index] == old then
+                count = count + 1
+                if new and not HasRef(list, new) then
+                    list[index] = new
+                else
+                    table.remove(list, index)
+                    if not list[1] then note.refs = nil end
+                end
+                break
+            end
+        end
+    end
+    -- Unsaved edits can hold the reference when no note does.
+    for index = 1, #refListeners do refListeners[index](old, new) end
+    if count > 0 then FireChanged("notes") end
+    return count
 end
 
 -- Deletes a note, and with it the references other notes hold to it. Those are exactly the notes it references.

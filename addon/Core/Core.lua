@@ -442,6 +442,98 @@ function ns.HoveredNPC()
 end
 
 -- ---------------------------------------------------------------------------
+-- Macros
+-- ---------------------------------------------------------------------------
+
+-- The game gives a macro no ID that lasts: its number is its place in the macro window, which moves as macros
+-- are made and deleted. A reference therefore holds the macro's name, and stands for whichever macro has that
+-- name on the character looking at it: the first one, when several share the name.
+
+-- Returns the name of the macro at a place in the macro window, or nil when there is none.
+function ns.MacroName(index)
+    if not (GetMacroInfo and IsID(index)) then return nil end
+    local name = GetMacroInfo(index)
+    return PublicString(name) and name ~= "" and name or nil
+end
+
+-- Returns the place in the macro window of the macro with this name, and its commands. Returns nil when this
+-- character has no macro by that name.
+function ns.FindMacro(name)
+    if not (GetMacroIndexByName and GetMacroInfo) then return nil end
+    local index = GetMacroIndexByName(name)
+    if not IsID(index) then return nil end
+    local _, _, body = GetMacroInfo(index)
+    return index, PublicString(body) and body or ""
+end
+
+-- Puts the macro on the cursor, ready to be placed on an action bar.
+function ns.TakeMacro(name)
+    local index = ns.FindMacro(name)
+    if not index then
+        ns.Print(L["This character has no macro named %s."]:format(name))
+    elseif PickupMacro then
+        ns.Try(function() PickupMacro(index) end)
+    end
+end
+
+-- The macros as they were when last looked at: how many there are, and how many of them have each name.
+local macroCount, macroNames
+
+-- Returns how many macros this character has, and how many of them have each name. Returns nil when this
+-- client has no macro API we know.
+local function ScanMacros()
+    if not (GetNumMacros and GetMacroInfo) then return nil end
+    local numAccount, numCharacter = GetNumMacros()
+    if not (PublicNumber(numAccount) and PublicNumber(numCharacter)) then return nil end
+    local names = {}
+    local function Count(first, count)
+        for index = first, first + count - 1 do
+            local name = ns.MacroName(index)
+            if name then names[name] = (names[name] or 0) + 1 end
+        end
+    end
+    Count(1, numAccount)
+    -- A character's own macros are numbered after the last place an account-wide one can have.
+    Count((MAX_ACCOUNT_MACROS or 120) + 1, numCharacter)
+    return numAccount + numCharacter, names
+end
+
+-- The macros changed, or are looked at for the first time. A reference holds a macro's name, so it follows a
+-- macro that was renamed, and is removed with one that was deleted. The game does not say what changed: that
+-- is worked out from what is different since the last look. Only a change to a single macro is acted on, so
+-- that macros arriving or being replaced wholesale (logging in, a sync with the server) never cost a
+-- reference. A macro this character never had (another character's own) is never missed here either.
+local function MacrosChanged()
+    local count, names = ScanMacros()
+    if not count then return end
+    local before, beforeNames = macroCount, macroNames
+    macroCount, macroNames = count, names
+    if not (beforeNames and ns.db) then return end
+
+    -- The names no macro has any more, and the names more macros have than before.
+    local gone, goneCount, gained, gainedCount = nil, 0, nil, 0
+    for name in pairs(beforeNames) do
+        if not names[name] then gone, goneCount = name, goneCount + 1 end
+    end
+    for name, number in pairs(names) do
+        if number > (beforeNames[name] or 0) then gained, gainedCount = name, gainedCount + 1 end
+    end
+    if goneCount ~= 1 then return end
+
+    if count == before and gainedCount == 1 then
+        -- As many macros as before, one name for another: a rename.
+        if ns.ReplaceRef(ns.Ref("macro", gone), ns.Ref("macro", gained)) > 0 then
+            ns.Print(L["The macro %s is now named %s. Your notes follow it."]:format(gone, gained))
+        end
+    elseif count == before - 1 and gainedCount == 0 then
+        -- One macro fewer and its name with it: a deletion.
+        if ns.ReplaceRef(ns.Ref("macro", gone), nil) > 0 then
+            ns.Print(L["The macro %s was deleted. Your notes no longer reference it."]:format(gone))
+        end
+    end
+end
+
+-- ---------------------------------------------------------------------------
 -- Quests an item belongs to
 -- ---------------------------------------------------------------------------
 
@@ -809,10 +901,11 @@ events:RegisterEvent("PLAYER_LOGIN")
 events:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 -- Fires once after a batch of bag changes. Clients without it get the per-bag event instead.
 if not pcall(events.RegisterEvent, events, "BAG_UPDATE_DELAYED") then events:RegisterEvent("BAG_UPDATE") end
--- A quest entering or leaving the quest log, or a profession learned or dropped: what decides whether a
--- reference can be opened. Not every client has all of these.
+-- A quest entering or leaving the quest log, a profession learned or dropped, a macro made, renamed or
+-- deleted: what decides whether a reference can be opened. Not every client has all of these.
 local OPENABLE_EVENTS = {
     QUEST_ACCEPTED = true, QUEST_REMOVED = true, QUEST_TURNED_IN = true, SKILL_LINES_CHANGED = true,
+    UPDATE_MACROS = true,
 }
 for event in pairs(OPENABLE_EVENTS) do pcall(events.RegisterEvent, events, event) end
 events:SetScript("OnEvent", function(self, event, arg1)
@@ -823,6 +916,8 @@ events:SetScript("OnEvent", function(self, event, arg1)
     elseif event == "PLAYER_LOGIN" then
         -- The chat frame is ready by now. The same is said again whenever the addon is asked to do something.
         if ns.dbProblem then ns.Print(ns.dbProblem) end
+        -- A first look at the macros, to tell later what changed.
+        MacrosChanged()
     elseif not ns.db then
         return
     elseif event == "GET_ITEM_INFO_RECEIVED" then
@@ -833,7 +928,8 @@ events:SetScript("OnEvent", function(self, event, arg1)
         bagCounts, bagOfItem, slotOfItem = nil, nil, nil
         ns.QueueChanged("state")
     elseif OPENABLE_EVENTS[event] then
-        -- Reference lists show whether a quest or a recipe can be opened.
+        if event == "UPDATE_MACROS" then MacrosChanged() end
+        -- Reference lists show whether a quest or a recipe can be opened, and a macro taken.
         ns.QueueChanged("state")
     end
 end)

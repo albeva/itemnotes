@@ -420,10 +420,10 @@ function ns.CreatePanelList(parent, rowHeight, initRow, updateRow)
 end
 
 -- ---------------------------------------------------------------------------
--- Reference list (items, other notes, quests, recipes, spells, NPCs and map pins attached to a note)
+-- Reference list (items, other notes, quests, recipes, spells, NPCs, macros and map pins attached to a note)
 -- ---------------------------------------------------------------------------
 
--- Which Wowhead page a kind of reference has. Notes and map pins have none.
+-- Which Wowhead page a kind of reference has. Notes, macros and map pins have none.
 local WOWHEAD_KIND = { item = "item", quest = "quest", recipe = "spell", spell = "spell", npc = "npc" }
 
 local function CopyWowheadLink(item)
@@ -432,7 +432,8 @@ local function CopyWowheadLink(item)
 end
 
 -- Returns one row per reference in refs, a note's list of references (or nil for none), in the same order.
--- A row has the reference's kind, its value (an ID, or for a map pin { mapID, x, y }) and its place in refs.
+-- A row has the reference's kind, its value (an ID, a macro's name, or for a map pin { mapID, x, y }) and its
+-- place in refs.
 function ns.RefItems(refs)
     local rows = {}
     if refs then
@@ -458,6 +459,8 @@ function ns.OpenRef(item)
     elseif item.kind == "npc" then
         -- The game has nothing to open for an NPC. Its Wowhead page is the next best thing.
         CopyWowheadLink(item)
+    elseif item.kind == "macro" then
+        ns.TakeMacro(item.value)
     else
         ns.OpenPin(item.value)
     end
@@ -572,6 +575,8 @@ local function RefText(item)
     elseif kind == "npc" then
         local label = ns.NPCLabel(value)
         return "|cffff8a8a" .. L["NPC"] .. "|r  " .. label, label
+    elseif kind == "macro" then
+        return "|cffff9ad5" .. L["Macro"] .. "|r  " .. value, value
     end
     local label = ns.PinLabel(value)
     return "|cff66b8ff" .. L["Map"] .. "|r  " .. label, label
@@ -581,7 +586,7 @@ end
 -- plain is the reference's plain name.
 local function UpdateOpenButton(open, item, plain)
     local kind, value = item.kind, item.value
-    -- Rows are reused: only a quest or a recipe that cannot be opened turns the button off.
+    -- Rows are reused: only a quest, a recipe or a macro that cannot be opened turns the button off.
     local canOpen = true
     if kind == "item" then
         open:SetText(L["View"])
@@ -609,6 +614,13 @@ local function UpdateOpenButton(open, item, plain)
         open:SetText(L["View"])
         open.tooltipTitle = L["View spell: %s"]:format(plain)
         open.tooltipText = L["Pins the spell tooltip on screen."]
+    elseif kind == "macro" then
+        -- Only a character that has a macro by this name can take it.
+        canOpen = ns.FindMacro(value) ~= nil
+        open:SetText(L["Take"])
+        open.tooltipTitle = canOpen and L["Take macro: %s"]:format(plain)
+            or L["This character has no macro by this name"]
+        open.tooltipText = canOpen and L["Puts the macro on your cursor, to place on an action bar."] or nil
     else
         open:SetText(L["Show"])
         open.tooltipTitle = L["Show on map: %s"]:format(plain)
@@ -619,9 +631,10 @@ end
 
 -- A list of a note's references, one per row. It comes in two forms:
 --   for reading (no onRemove): each row has buttons to open the reference in game (not for an NPC, which the
---     game has nothing to open for) and, for all but notes and map pins, to copy its Wowhead link
+--     game has nothing to open for) and, for all but notes, macros and map pins, to copy its Wowhead link
 --   for editing (onRemove(item) given): each row has a remove button and nothing else
--- Pass onDrop() to accept dragged items and spells. Double-clicking a row opens its reference in either form.
+-- Pass onDrop() to accept dragged items, spells and macros. Double-clicking a row opens its reference in
+-- either form.
 function ns.CreateRefList(parent, onRemove, onDrop)
     return ns.CreatePanelList(parent, 24, function(row)
         ns.AddHighlight(row)
@@ -638,6 +651,17 @@ function ns.CreateRefList(parent, onRemove, onDrop)
             elseif item.kind == "spell" and GameTooltip.SetSpellByID then
                 GameTooltip:SetOwner(self, "ANCHOR_LEFT")
                 GameTooltip:SetSpellByID(item.value)
+                GameTooltip:Show()
+            elseif item.kind == "macro" then
+                -- The macro's commands, as this character has them.
+                local index, body = ns.FindMacro(item.value)
+                GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+                GameTooltip:AddLine(item.value, 1, 1, 1, true)
+                if not index then
+                    GameTooltip:AddLine(L["This character has no macro by this name"], 1, 0.5, 0.5, true)
+                elseif body ~= "" then
+                    GameTooltip:AddLine(body, 0.8, 0.8, 0.8, true)
+                end
                 GameTooltip:Show()
             else
                 -- Full text, in case the row is too narrow to show it all.

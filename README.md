@@ -8,7 +8,7 @@ Notes are stored by item ID and shared across all characters on your account. Th
 
 - Add a note to any item by hovering it and pressing a keybind
 - Notes appear in the item's tooltip
-- Attach quests, crafting recipes, spells, NPCs, map locations, other items and other notes as references
+- Attach quests, crafting recipes, spells, NPCs, macros, map locations, other items and other notes as references
 - Location, time and character are recorded automatically
 - One window to search, sort and manage all notes
 - Copy a Wowhead link or post the item link in chat
@@ -29,7 +29,7 @@ While the editor is open:
 - **Shift-click** a spell in the spellbook to attach it
 - **Shift-click** an NPC in the world, or its unit frame, to attach it
 - **Shift-click** a note in the Item Notes window to attach that note
-- **Drag** an item or a spell onto the window to attach it
+- **Drag** an item, a spell or a macro onto the window to attach it
 - **Add My Location** / **Add Map Pin** attach a map location
 
 A new note for an item that belongs to a quest starts with that quest attached: the quest the item starts, or a quest in your quest log that uses or collects it. With Questie installed, quests that are not in your log are found too. Remove the reference if it is not the one you want.
@@ -37,6 +37,8 @@ A new note for an item that belongs to a quest starts with that quest attached: 
 A recipe reference opens the crafting window at that recipe, on a character that has the profession.
 
 A spell reference shows the spell's tooltip. An NPC reference keeps the NPC's name and gives its Wowhead link; the game has nothing to open for an NPC. For a mob it stands for the kind, not the one you clicked: shift-click any Defias Bandit and the reference covers all of them. Shift-clicking an NPC also targets it, and shift-clicking a spell on an action bar also casts it, so attach spells from the spellbook.
+
+A macro reference is kept by the macro's name, since the game gives macros no lasting ID. It shows the macro's commands and **Take** puts the macro on your cursor, on a character that has a macro by that name. Rename the macro and the reference follows it; delete the macro and the reference is removed from every note.
 
 A reference to another note opens that note, and goes both ways: attach note B to note A and B lists A as well. Removing it from either side removes it from both. Deleting a note also removes every reference to it.
 
