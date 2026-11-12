@@ -1,4 +1,4 @@
 <Bindings>
-    <Binding name="ITEMNOTES_EDIT" header="ITEMNOTES" category="ADDONS" default="ALT-SHIFT-N">ItemNotes_EditHovered()</Binding>
+    <Binding name="ITEMNOTES_EDIT" header="ITEMNOTES" category="ADDONS" default="CTRL-SHIFT-N">ItemNotes_EditHovered()</Binding>
     <Binding name="ITEMNOTES_TOGGLE" category="ADDONS">ItemNotes_Toggle()</Binding>
 </Bindings>

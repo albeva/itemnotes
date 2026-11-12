@@ -59,7 +59,7 @@ Double-click a note to edit it. Drag an item onto the window to add a new note.
 
 ## Setup
 
-The keybind is **Alt-Shift-N** by default. Change it under **Options > Keybindings > AddOns > Item Notes**.
+The keybind is **Ctrl-Shift-N** by default. Change it under **Options > Keybindings > AddOns > Item Notes**.
 
 ## Commands
 

@@ -8,7 +8,7 @@
 - Notes can reference spells. Shift-click a spell in the spellbook, or drag it onto the editor.
 - Notes can reference NPCs. Shift-click an NPC in the world, or its unit frame, while the editor is open.
 - Notes can reference macros. Drag a macro from the macro window onto the editor. The reference follows a renamed macro and is removed with a deleted one.
-- The keybind has a default key: Alt-Shift-N.
+- The keybind has a default key: Ctrl-Shift-N.
 - While the editor is open, the keybind attaches what the mouse is over, like a shift-click. Use it for a spell or a macro on an action bar, which a click would set off.
 
 ### Changed
