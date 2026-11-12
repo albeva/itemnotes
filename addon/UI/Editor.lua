@@ -49,9 +49,7 @@ local function RefreshRefs()
         local kind, id = ns.ParseRef(attached[index])
         if kind == "note" and not ns.GetNote(id) then table.remove(attached, index) end
     end
-    local items = ns.RefItems(attached)
-    editor.refs:SetItems(items)
-    editor.noRefs:SetShown(#items == 0)
+    editor.refs:SetItems(ns.RefItems(attached))
 end
 
 -- The count on the item's icon follows what is in the bags.
@@ -422,11 +420,6 @@ local function CreateEditor()
     refPanel:SetScript("OnReceiveDrag", TakeCursor)
     refPanel:SetScript("OnMouseUp", TakeCursor)
 
-    editor.noRefs = ns.Text(refPanel, "small", "muted")
-    editor.noRefs:SetPoint("CENTER")
-    editor.noRefs:SetJustifyH("CENTER")
-    editor.noRefs:SetText(L["Nothing attached yet. Shift-click a quest, recipe, item, spell\nor NPC anywhere in the game, or a note in the Item Notes\nwindow. Or drag an item or a spell onto this window."])
-
     -- Everything else is attached by shift-click. Only map locations need buttons.
     local addHere = ns.CreateButton(editor, L["Add My Location"], 140, function()
         AddPin(ns.GetPlayerPin(), L["Your position is not available here (instances have no map coordinates)."])
@@ -538,8 +531,7 @@ function ns.OpenEditor(itemID, force)
     editor.meta:SetText(L["Item ID %d"]:format(itemID))
     editor.edit:SetText(editor.originalText)
     editor.delete:SetShown(note ~= nil)
-    editor.recorded:SetText(note and ns.RecordedText(note)
-        or L["Your location and the time are recorded when you save."])
+    editor.recorded:SetText(note and ns.RecordedText(note) or "")
 
     if draft and draft.itemID == itemID then
         editor.attached = draft.attached
