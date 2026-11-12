@@ -13,3 +13,4 @@ ignore:
   - README.md
   - art
   - screenshots
+  - tests

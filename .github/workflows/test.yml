@@ -1,0 +1,22 @@
+name: Tests
+
+# Runs the unit tests (tests/) on every push to main and on every pull request.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The game runs Lua 5.1; LuaJIT speaks the same language.
+      - run: sudo apt-get update && sudo apt-get install -y luajit
+
+      - run: luajit tests/run.lua

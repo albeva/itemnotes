@@ -102,10 +102,22 @@ Restart the game.
 | Path | Contents |
 |---|---|
 | `addon/` | Everything the game loads, plus lint config |
+| `tests/` | Unit tests, run outside the game |
 | `.pkgmeta` | Packaging config |
 | `.github/workflows/release.yml` | Builds and publishes a release when a version tag is pushed |
+| `.github/workflows/test.yml` | Runs the unit tests on every push |
 | `art/` | Icon source (SVG) and a 512px render |
 | `screenshots/` | Images for this page |
+
+## Tests
+
+The unit tests cover the addon's logic (`addon/Core/`): saved data, migrations, references, and everything a note looks up in the game. They run outside the game, against a stand-in for the game's API (`tests/wow.lua`), and need only [LuaJIT](https://luajit.org/) or Lua 5.1. The windows (`addon/UI/`) are not covered.
+
+```
+luajit tests/run.lua
+```
+
+Add `-v` to list every test, or name spec files to run only those. A new `tests/*_spec.lua` file is picked up by itself.
 
 ## Releasing
 
