@@ -34,7 +34,7 @@ read_globals = {
     "GetCursorInfo", "GetCursorPosition", "GetItemInfo", "GetItemInfoInstant", "GetMouseFoci", "GetMouseFocus",
     "GetNumQuestLeaderBoards", "GetNumQuestLogEntries", "GetQuestLogIndexByID", "GetQuestLogLeaderBoard",
     "GetQuestLogSpecialItemInfo", "GetQuestLogTitle",
-    "GetRealmName", "GetRealZoneText", "GetSpellInfo", "GetSubZoneText", "HideUIPanel",
+    "GetRealmName", "GetRealZoneText", "GetSpellInfo", "GetSubZoneText", "GetUnitName", "HideUIPanel",
     "InCombatLockdown", "InterfaceOptions_AddCategory", "InterfaceOptionsFrame_OpenToCategory",
     "IsBagOpen", "IsControlKeyDown", "IsMetaKeyDown", "IsModifiedClick", "IsMouseButtonDown", "IsShiftKeyDown",
     "OpenAllBags", "OpenBag", "OpenWorldMap", "QuestLog_SetSelection", "QuestMapFrame_OpenToQuestDetails",

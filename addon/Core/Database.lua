@@ -494,6 +494,18 @@ local function SyncNoteRefs(notes, itemID, previous, current)
     end
 end
 
+-- The player's name as "First Last". On the Forever client a character has a surname, and UnitName returns it
+-- as its second value, where other clients return a realm. Builds have differed on this, so when UnitName gives
+-- no surname the full display name is taken from GetUnitName, which has the two joined already.
+local function PlayerName()
+    local first, last = UnitName("player")
+    if type(first) ~= "string" or first == "" then return "?" end
+    if type(last) == "string" and last ~= "" then return first .. " " .. last end
+    local full = GetUnitName and GetUnitName("player", true)
+    if type(full) == "string" and full ~= "" then return full end
+    return first
+end
+
 -- Creates or updates a note. Location, character and creation time are recorded once, when the note is created.
 -- refs is the list of the note's references, in the order they are to be shown: it replaces the note's
 -- current list, and without it the references stay as they are. The list is copied, not kept.
@@ -505,7 +517,7 @@ function ns.SaveNote(itemID, text, refs)
         note = {
             created = now,
             loc = ns.CaptureLocation(),
-            char = (UnitName("player") or "?") .. " - " .. (GetRealmName() or "?"),
+            char = PlayerName() .. " - " .. (GetRealmName() or "?"),
         }
         db.notes[itemID] = note
     end

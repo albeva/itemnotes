@@ -18,6 +18,7 @@
 ### Fixed
 
 - Loading, searching and bag changes stay fast with many notes.
+- New notes record the character's surname as well as the first name.
 
 ## 1.0.0-alpha3 - 2026-11-11
 
