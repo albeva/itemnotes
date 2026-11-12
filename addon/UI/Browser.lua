@@ -481,12 +481,6 @@ local function CreateBrowser()
     browser.count:SetPoint("RIGHT", panel, "BOTTOMRIGHT", -2, -23)
     browser.count:SetJustifyH("RIGHT")
 
-    local hint = ns.Text(browser, "small", "muted")
-    hint:SetPoint("LEFT", options, "RIGHT", 10, 0)
-    hint:SetPoint("RIGHT", browser.count, "LEFT", -10, 0)
-    hint:SetWordWrap(false)
-    hint:SetText(L["Double-click to edit. Drag an item here to add a note."])
-
     browser.detail = CreateDetail(browser)
     browser.detail:SetPoint("TOPLEFT", panel, "TOPRIGHT", 12, 32)
     browser.detail:SetPoint("BOTTOMRIGHT", -14, 14)
