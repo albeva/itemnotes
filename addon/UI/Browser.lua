@@ -21,6 +21,7 @@ local function Matches(entry, filter)
     local note = entry.note
     local haystack = { entry.name, note.text or "", ns.LocationText(note.loc), note.char or "", tostring(entry.id) }
     for _, quest in ipairs(note.quests) do haystack[#haystack + 1] = quest.title or "" end
+    for _, recipe in ipairs(note.recipes) do haystack[#haystack + 1] = recipe.name or "" end
     for _, pin in ipairs(note.pins) do haystack[#haystack + 1] = ns.PinLabel(pin) end
     for _, item in ipairs(note.items) do haystack[#haystack + 1] = item.name or "" end
     for _, ref in ipairs(note.notes) do
@@ -90,7 +91,7 @@ local function RefreshDetail()
         detail.noteScroll:ScrollTo(0)
     end
 
-    local refs = ns.RefItems(note.quests, note.pins, note.items, note.notes)
+    local refs = ns.RefItems(note.quests, note.pins, note.items, note.notes, note.recipes)
     detail.refs:SetItems(refs)
     -- A note without references shows no references section at all.
     detail.refLabel:SetShown(#refs > 0)
@@ -315,12 +316,13 @@ local function UpdateRow(row, entry)
     row.name:SetTextColor(ns.QualityColor(note.quality))
 
     local text = (note.text or ""):gsub("%s+", " ")
-    local items, notes, quests, pins = #note.items, #note.notes, #note.quests, #note.pins
-    if items + notes + quests + pins > 0 then
+    local items, notes, quests, recipes, pins = #note.items, #note.notes, #note.quests, #note.recipes, #note.pins
+    if items + notes + quests + recipes + pins > 0 then
         local refs = {}
         if items > 0 then refs[#refs + 1] = Plural(items, L["%d item"], L["%d items"]) end
         if notes > 0 then refs[#refs + 1] = Plural(notes, L["%d note"], L["%d notes"]) end
         if quests > 0 then refs[#refs + 1] = Plural(quests, L["%d quest"], L["%d quests"]) end
+        if recipes > 0 then refs[#refs + 1] = Plural(recipes, L["%d recipe"], L["%d recipes"]) end
         if pins > 0 then refs[#refs + 1] = Plural(pins, L["%d location"], L["%d locations"]) end
         text = "|cff66b8ff" .. table.concat(refs, ", ") .. "|r  " .. text
     end

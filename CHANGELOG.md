@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Notes can reference crafting recipes. Shift-click a recipe in the crafting window, or a tracked recipe, while the editor is open. Open shows the recipe in the crafting window.
+
 ## 1.0.0-alpha3 - 2026-11-11
 
 ### Added

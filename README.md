@@ -8,7 +8,7 @@ Notes are stored by item ID and shared across all characters on your account. Th
 
 - Add a note to any item by hovering it and pressing a keybind
 - Notes appear in the item's tooltip
-- Attach quests, map locations, other items and other notes as references
+- Attach quests, crafting recipes, map locations, other items and other notes as references
 - Location, time and character are recorded automatically
 - One window to search, sort and manage all notes
 - Copy a Wowhead link or post the item link in chat
@@ -25,11 +25,14 @@ Hover over an item and press your keybind. Type the note and press Enter.
 While the editor is open:
 
 - **Shift-click** a quest (tracker or quest log) or any item to attach it
+- **Shift-click** a recipe in the crafting window, or a tracked recipe, to attach it
 - **Shift-click** a note in the Item Notes window to attach that note
 - **Drag** an item onto the window to attach it
 - **Add My Location** / **Add Map Pin** attach a map location
 
 A new note for an item that belongs to a quest starts with that quest attached: the quest the item starts, or a quest in your quest log that uses or collects it. With Questie installed, quests that are not in your log are found too. Remove the reference if it is not the one you want.
+
+A recipe reference opens the crafting window at that recipe, on a character that has the profession.
 
 A reference to another note opens that note, and goes both ways: attach note B to note A and B lists A as well. Removing it from either side removes it from both. Deleting a note also removes every reference to it.
 

@@ -29,7 +29,7 @@ local function IsDirty()
 end
 
 -- ---------------------------------------------------------------------------
--- References (items, other notes, quests and map pins) being edited
+-- References (items, other notes, quests, recipes and map pins) being edited
 -- ---------------------------------------------------------------------------
 
 local function RefreshRefs()
@@ -37,7 +37,7 @@ local function RefreshRefs()
     for index = #editor.notes, 1, -1 do
         if not ns.GetNote(editor.notes[index].id) then table.remove(editor.notes, index) end
     end
-    local items = ns.RefItems(editor.quests, editor.pins, editor.items, editor.notes)
+    local items = ns.RefItems(editor.quests, editor.pins, editor.items, editor.notes, editor.recipes)
     editor.refs:SetItems(items)
     editor.noRefs:SetShown(#items == 0)
 end
@@ -53,7 +53,9 @@ local function RefsChanged()
 end
 
 local function RemoveRef(item)
-    local lists = { quest = editor.quests, pin = editor.pins, item = editor.items, note = editor.notes }
+    local lists = {
+        quest = editor.quests, recipe = editor.recipes, pin = editor.pins, item = editor.items, note = editor.notes,
+    }
     table.remove(lists[item.kind], item.index)
     RefsChanged()
 end
@@ -102,6 +104,16 @@ local function AddQuest(questID)
     RefsChanged()
 end
 
+-- name is the recipe's name when the clicked frame carried it; otherwise the game is asked.
+local function AddRecipe(recipeID, name)
+    for _, recipe in ipairs(editor.recipes) do
+        if recipe.id == recipeID then return end
+    end
+    if type(name) ~= "string" or name == "" then name = ns.RecipeName(recipeID) end
+    editor.recipes[#editor.recipes + 1] = { id = recipeID, name = name }
+    RefsChanged()
+end
+
 local function AddPin(pin, problem)
     if not pin then
         ns.Print(problem)
@@ -117,7 +129,7 @@ local function AddPin(pin, problem)
 end
 
 -- ---------------------------------------------------------------------------
--- Shift-click a quest (tracker, quest log, Questie tracker) to attach it
+-- Shift-click a quest (tracker, quest log, Questie tracker) or a recipe (crafting window, trackers) to attach it
 -- ---------------------------------------------------------------------------
 
 local function ValidQuestID(value, mustBeInLog)
@@ -127,8 +139,8 @@ local function ValidQuestID(value, mustBeInLog)
     return not mustBeInLog and ns.QuestTitle(value) ~= nil
 end
 
--- Walks up from the frame under the mouse looking for something that carries a quest ID.
-local function QuestIDUnderMouse()
+-- Returns the frame under the mouse followed by its parents, and whether they belong to the objective tracker.
+local function FramesUnderMouse()
     local focus
     if GetMouseFoci then
         local foci = GetMouseFoci()
@@ -147,6 +159,32 @@ local function QuestIDUnderMouse()
         end
         focus = focus.GetParent and focus:GetParent() or nil
     end
+    return chain, inTracker
+end
+
+-- Looks through the frames for one that carries a crafting recipe. Returns the recipe's ID and, when the frame
+-- has it, the recipe's name.
+local function RecipeIn(chain)
+    for _, frame in ipairs(chain) do
+        -- Rows of the crafting window's recipe list: their data is a tree node around the recipe's info.
+        local data = frame.GetElementData and frame:GetElementData()
+        if type(data) == "table" and type(data.GetData) == "function" then data = data:GetData() end
+        local info = type(data) == "table" and data.recipeInfo
+        if type(info) == "table" and ns.IsID(info.recipeID) then return info.recipeID, info.name end
+        -- Questie tracker lines.
+        local questie = frame.Recipe
+        if type(questie) == "table" and ns.IsID(questie.Id) then return questie.Id, questie.Name end
+        -- Tracked recipes in the objective tracker keep the recipe ID in .id, negative for a recraft.
+        if ProfessionsRecipeTracker and frame.parentModule == ProfessionsRecipeTracker and ns.PublicNumber(frame.id) then
+            local recipeID = math.abs(frame.id)
+            if ns.IsID(recipeID) then return recipeID end
+        end
+    end
+    return nil
+end
+
+-- Looks through the frames for one that carries a quest ID.
+local function QuestIn(chain, inTracker)
     for _, frame in ipairs(chain) do
         -- Quest log entries and map quest pins.
         if ValidQuestID(frame.questID) then return frame.questID end
@@ -161,6 +199,18 @@ local function QuestIDUnderMouse()
         -- Objective tracker blocks keep the quest ID in .id; only trust it for quests in the log.
         if inTracker and ValidQuestID(frame.id, true) then return frame.id end
     end
+    return nil
+end
+
+-- Returns what the mouse is over that can be attached by ID: "recipe" or "quest", its ID and, for a recipe whose
+-- frame has it, its name.
+local function RefUnderMouse()
+    local chain, inTracker = FramesUnderMouse()
+    -- Recipes first: a tracked recipe's block keeps its ID in .id, which is where a tracked quest keeps its own.
+    local recipeID, name = RecipeIn(chain)
+    if recipeID then return "recipe", recipeID, name end
+    local questID = QuestIn(chain, inTracker)
+    if questID then return "quest", questID end
     return nil
 end
 
@@ -183,22 +233,40 @@ local function RestoreWatch(questID, wasWatched)
     end)
 end
 
+local function IsRecipeTracked(recipeID)
+    if C_TradeSkillUI and C_TradeSkillUI.IsRecipeTracked then
+        return C_TradeSkillUI.IsRecipeTracked(recipeID, false)
+    end
+    return nil
+end
+
+-- The same for recipes: shift-click toggles recipe tracking when no chat box is open.
+local function RestoreRecipeTracked(recipeID, wasTracked)
+    if wasTracked == nil or IsRecipeTracked(recipeID) == wasTracked then return end
+    ns.Try(function() C_TradeSkillUI.SetRecipeTracked(recipeID, wasTracked, false) end)
+end
+
 -- Blizzard's own shift-click on a stack opens the split-stack prompt. The click was meant for us: close it.
 local function HideStackSplit()
     if StackSplitFrame and StackSplitFrame:IsShown() then StackSplitFrame:Hide() end
 end
 
-local pendingQuest, pendingWatched
-local pendingItem = false
+-- Undoes what the clicked frame's own handler does with the shift-click that attached a reference.
+local pendingUndo
 
 local function OnGlobalMouse(_, event, button)
     if event == "GLOBAL_MOUSE_DOWN" then
-        pendingQuest, pendingItem = nil, false
+        pendingUndo = nil
         if button ~= "LeftButton" or not IsShiftKeyDown() then return end
-        local ok, questID = pcall(QuestIDUnderMouse)
-        if ok and questID then
-            pendingQuest, pendingWatched = questID, IsWatched(questID)
-            AddQuest(questID)
+        local ok, kind, id, name = pcall(RefUnderMouse)
+        if ok and kind == "recipe" then
+            local wasTracked = IsRecipeTracked(id)
+            pendingUndo = function() RestoreRecipeTracked(id, wasTracked) end
+            AddRecipe(id, name)
+        elseif ok and kind == "quest" then
+            local wasWatched = IsWatched(id)
+            pendingUndo = function() RestoreWatch(id, wasWatched) end
+            AddQuest(id)
         elseif not editor:IsMouseOver() then
             -- A note in the Item Notes window is attached as a note, not as its bare item.
             local noteID = ns.HoveredNote()
@@ -206,23 +274,19 @@ local function OnGlobalMouse(_, event, button)
                 AddNote(noteID)
                 return
             end
-            -- Not a quest: attach whatever item the mouse is hovering (bag slot, quest reward, list row...).
+            -- Not a quest or a recipe: attach whatever item the mouse is hovering (bag slot, quest reward, list
+            -- row...).
             local itemID = ns.HoveredItem()
             if itemID then
                 AddItem(itemID)
-                pendingItem = true
+                pendingUndo = HideStackSplit
             end
         end
     elseif event == "GLOBAL_MOUSE_UP" then
         -- Mouse released: the clicked frame's own handler has run by the next frame. Undo its side effects.
-        if pendingQuest then
-            local questID, wasWatched = pendingQuest, pendingWatched
-            pendingQuest = nil
-            C_Timer.After(0.05, function() RestoreWatch(questID, wasWatched) end)
-        end
-        if pendingItem then
-            pendingItem = false
-            C_Timer.After(0.05, HideStackSplit)
+        if pendingUndo then
+            C_Timer.After(0.05, pendingUndo)
+            pendingUndo = nil
         end
     end
 end
@@ -240,11 +304,12 @@ end
 local function Save()
     local itemID = editor.itemID
     local text = ns.Trim(editor.edit:GetText())
-    if text == "" and #editor.quests == 0 and #editor.pins == 0 and #editor.items == 0 and #editor.notes == 0 then
+    if text == "" and #editor.quests == 0 and #editor.pins == 0 and #editor.items == 0 and #editor.notes == 0
+        and #editor.recipes == 0 then
         -- Nothing left to keep: an emptied note is removed.
         ns.DeleteNote(itemID)
     else
-        ns.SaveNote(itemID, text, editor.quests, editor.pins, editor.items, editor.notes)
+        ns.SaveNote(itemID, text, editor.quests, editor.pins, editor.items, editor.notes, editor.recipes)
         if draft then
             -- Unsaved edits wait for another item. References go both ways, so a link to that item made or
             -- removed here must show in them too, or saving them later would undo it.
@@ -314,7 +379,7 @@ local function CreateEditor()
 
     local refHint = ns.Text(editor, "small", "muted")
     refHint:SetPoint("TOPRIGHT", -14, -122)
-    refHint:SetText(L["Shift-click a quest, item or note to attach it"])
+    refHint:SetText(L["Shift-click a quest, recipe, item or note to attach it"])
 
     local refPanel
     refPanel, editor.refs = ns.CreateRefList(editor, RemoveRef, TakeCursorItem)
@@ -327,9 +392,9 @@ local function CreateEditor()
     editor.noRefs = ns.Text(refPanel, "small", "muted")
     editor.noRefs:SetPoint("CENTER")
     editor.noRefs:SetJustifyH("CENTER")
-    editor.noRefs:SetText(L["No items, notes, quests or map locations attached.\nShift-click a quest or an item anywhere in the game, or a note\nin the Item Notes window. Or drag an item onto this window."])
+    editor.noRefs:SetText(L["No items, notes, quests, recipes or map locations attached.\nShift-click a quest, recipe or item anywhere in the game, or a\nnote in the Item Notes window. Or drag an item onto this window."])
 
-    -- Quests, items and notes are attached by shift-click. Only map locations need buttons.
+    -- Quests, recipes, items and notes are attached by shift-click. Only map locations need buttons.
     local addHere = ns.CreateButton(editor, L["Add My Location"], 140, function()
         local loc = ns.CaptureLocation()
         local pin = loc.mapID and loc.x and { mapID = loc.mapID, x = loc.x, y = loc.y, name = ns.MapName(loc.mapID) }
@@ -375,12 +440,13 @@ local function CreateEditor()
     end)
     editor:SetScript("OnHide", function(self)
         self:UnregisterAllEvents()
-        pendingQuest, pendingItem = nil, false
+        pendingUndo = nil
         if not closing and IsDirty() then
             draft = {
                 itemID = editor.itemID,
                 text = edit:GetText(),
                 quests = editor.quests,
+                recipes = editor.recipes,
                 pins = editor.pins,
                 items = editor.items,
                 notes = editor.notes,
@@ -436,6 +502,7 @@ function ns.OpenEditor(itemID, force)
     -- A new note starts with the item's quests already attached. They are its starting point, not an edit:
     -- closing the editor untouched keeps nothing, and removing one is an edit like any other.
     editor.quests = note and CopyList(note.quests) or ns.QuestsForItem(itemID)
+    editor.recipes = CopyList(note and note.recipes)
     editor.pins = CopyList(note and note.pins)
     editor.items = CopyList(note and note.items)
     editor.notes = CopyList(note and note.notes)
@@ -453,6 +520,7 @@ function ns.OpenEditor(itemID, force)
 
     if draft and draft.itemID == itemID then
         editor.quests, editor.pins, editor.items, editor.notes = draft.quests, draft.pins, draft.items, draft.notes
+        editor.recipes = draft.recipes
         editor.refsChanged = true
         editor.edit:SetText(draft.text)
         draft = nil

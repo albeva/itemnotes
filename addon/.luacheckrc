@@ -24,7 +24,7 @@ read_globals = {
     "date", "time", "geterrorhandler", "issecretvalue",
 
     -- Namespaces
-    "C_Container", "C_Item", "C_Map", "C_QuestLog", "C_SuperTrack", "C_Timer",
+    "C_Container", "C_Item", "C_Map", "C_QuestLog", "C_Spell", "C_SuperTrack", "C_Timer", "C_TradeSkillUI",
     "ChatFrameUtil", "Enum", "Settings", "TooltipDataProcessor", "TooltipUtil", "UiMapPoint",
 
     -- Functions
@@ -42,8 +42,8 @@ read_globals = {
 
     -- Frames and font objects
     "BagItemSearchBox", "ChatFontNormal", "GameFontHighlight", "GameFontHighlightSmall", "GameFontNormalLarge",
-    "GameTooltip", "ItemRefTooltip", "NumberFontNormal", "ObjectiveTrackerFrame", "QuestLogFrame",
-    "QuestObjectiveTracker", "SettingsPanel", "ShoppingTooltip1", "ShoppingTooltip2",
+    "GameTooltip", "ItemRefTooltip", "NumberFontNormal", "ObjectiveTrackerFrame", "ProfessionsRecipeTracker",
+    "QuestLogFrame", "QuestObjectiveTracker", "SettingsPanel", "ShoppingTooltip1", "ShoppingTooltip2",
     "StackSplitFrame", "UIParent", "WatchFrame", "WorldFrame", "WorldMapFrame",
 
     -- Constants

@@ -142,7 +142,7 @@ function ns.RecordedText(note, short)
     return table.concat(lines, "\n")
 end
 
--- Wowhead database for the Forever client. kind is "item" or "quest".
+-- Wowhead database for the Forever client. kind is "item", "quest" or "spell" (a crafting recipe is a spell).
 function ns.WowheadURL(kind, id)
     return "https://www.wowhead.com/forever/" .. kind .. "=" .. id
 end
@@ -333,6 +333,39 @@ function ns.OpenQuest(quest)
         if shown then return end
     end
     ns.Print(L["%s (quest %d) is %s."]:format(quest.title or L["Quest"], quest.id, status))
+end
+
+-- ---------------------------------------------------------------------------
+-- Crafting recipes
+-- ---------------------------------------------------------------------------
+
+-- A recipe's ID is the ID of the spell that crafts it.
+function ns.RecipeName(recipeID)
+    local name
+    if C_TradeSkillUI and C_TradeSkillUI.GetRecipeInfo then
+        local info = C_TradeSkillUI.GetRecipeInfo(recipeID)
+        name = info and info.name
+    end
+    if not name and C_Spell and C_Spell.GetSpellName then name = C_Spell.GetSpellName(recipeID) end
+    return PublicString(name) and name ~= "" and name or nil
+end
+
+function ns.RecipeLabel(recipe)
+    return recipe.name or L["Recipe #%d"]:format(recipe.id)
+end
+
+-- Whether the crafting window can show the recipe: only for a character that has the recipe's profession.
+function ns.CanOpenRecipe(recipeID)
+    if not (C_TradeSkillUI and C_TradeSkillUI.OpenRecipe) then return false end
+    if not C_TradeSkillUI.IsRecipeProfessionLearned then return true end
+    return C_TradeSkillUI.IsRecipeProfessionLearned(recipeID) == true
+end
+
+-- Opens the crafting window at the recipe.
+function ns.OpenRecipe(recipe)
+    if ns.CanOpenRecipe(recipe.id) and ns.Try(function() C_TradeSkillUI.OpenRecipe(recipe.id) end) then return end
+    ns.Print(L["%s (recipe %d) needs a profession this character does not have."]
+        :format(ns.RecipeLabel(recipe), recipe.id))
 end
 
 -- ---------------------------------------------------------------------------
@@ -569,6 +602,11 @@ local function ValidQuestRef(quest)
     return IsID(quest.id)
 end
 
+local function ValidRecipeRef(recipe)
+    recipe.name = StringOrNil(recipe.name)
+    return IsID(recipe.id)
+end
+
 local function ValidPinRef(pin)
     pin.name, pin.title = StringOrNil(pin.name), StringOrNil(pin.title)
     return type(pin.mapID) == "number" and type(pin.x) == "number" and type(pin.y) == "number"
@@ -645,6 +683,7 @@ local function SanitizeNotes(db)
                 loc.mapID, loc.x, loc.y = NumberOrNil(loc.mapID), NumberOrNil(loc.x), NumberOrNil(loc.y)
             end
             note.quests = CleanList(note.quests, ValidQuestRef)
+            note.recipes = CleanList(note.recipes, ValidRecipeRef)
             note.pins = CleanList(note.pins, ValidPinRef)
             note.items = CleanList(note.items, ValidItemRef)
             note.notes = CleanList(note.notes, ValidNoteRef)
@@ -685,7 +724,7 @@ end
 -- Creates or updates a note. Location, character and creation time are recorded once, when the note is created.
 -- notes lists references to other items' notes, as { id = itemID } entries. Those go both ways: each note
 -- listed gains a reference back to this one, and a note no longer listed loses its reference to this one.
-function ns.SaveNote(itemID, text, quests, pins, items, notes)
+function ns.SaveNote(itemID, text, quests, pins, items, notes, recipes)
     local note = ns.db.notes[itemID]
     local now = time()
     if not note then
@@ -702,6 +741,7 @@ function ns.SaveNote(itemID, text, quests, pins, items, notes)
     note.pins = pins or note.pins or {}
     note.items = items or note.items or {}
     note.notes = notes or note.notes or {}
+    note.recipes = recipes or note.recipes or {}
     CleanNoteRefs(ns.db, itemID, note)
     MirrorNoteRefs(ns.db, itemID, note, true)
     ns.CacheItemInfo(itemID, note)
@@ -856,9 +896,12 @@ events:RegisterEvent("ADDON_LOADED")
 events:RegisterEvent("GET_ITEM_INFO_RECEIVED")
 -- Fires once after a batch of bag changes. Clients without it get the per-bag event instead.
 if not pcall(events.RegisterEvent, events, "BAG_UPDATE_DELAYED") then events:RegisterEvent("BAG_UPDATE") end
--- A quest entering or leaving the quest log. Not every client has all of these.
-local QUEST_EVENTS = { QUEST_ACCEPTED = true, QUEST_REMOVED = true, QUEST_TURNED_IN = true }
-for event in pairs(QUEST_EVENTS) do pcall(events.RegisterEvent, events, event) end
+-- A quest entering or leaving the quest log, or a profession learned or dropped: what decides whether a
+-- reference can be opened. Not every client has all of these.
+local OPENABLE_EVENTS = {
+    QUEST_ACCEPTED = true, QUEST_REMOVED = true, QUEST_TURNED_IN = true, SKILL_LINES_CHANGED = true,
+}
+for event in pairs(OPENABLE_EVENTS) do pcall(events.RegisterEvent, events, event) end
 events:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" then
         if arg1 ~= addonName then return end
@@ -882,8 +925,8 @@ events:SetScript("OnEvent", function(self, event, arg1)
         -- The open windows show bag counts, so they refresh as if a note had changed.
         bagCounts, bagOfItem, slotOfItem = nil, nil, nil
         if ns.db then FireChanged() end
-    elseif QUEST_EVENTS[event] then
-        -- Reference lists show whether a quest can be opened, which follows the quest log.
+    elseif OPENABLE_EVENTS[event] then
+        -- Reference lists show whether a quest or a recipe can be opened.
         if ns.db then FireChanged() end
     end
 end)
